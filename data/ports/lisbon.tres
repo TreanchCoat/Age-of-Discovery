@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="PortDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/port_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"lisbon"
+display_name = "Lisbon"
+culture = &"iberian"
+world_position = Vector3(0, 0, 0)
+size = 4
+produces = Array[StringName]([&"wine", &"cloth"])
+demands = Array[StringName]([&"spices"])
+has_shipyard = true
+description = "Home port. Gateway to the Atlantic."

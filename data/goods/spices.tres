@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="GoodDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/good_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"spices"
+display_name = "Spices"
+category = "spice"
+base_price = 400
+weight_per_unit = 0.5
+perishable = false
+description = "Worth more than gold by weight, if you can get it home."

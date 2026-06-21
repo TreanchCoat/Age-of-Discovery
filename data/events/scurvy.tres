@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="VoyageEventDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/voyage_event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"scurvy"
+display_name = "Scurvy Outbreak"
+text = "Weeks without fresh food take their toll. Gums bleed; men weaken in their hammocks."
+tick = "daily"
+base_chance = 0.15
+requires_at_sea = true
+min_days_at_sea = 10
+crew_delta = -2
+morale_delta = -0.2
+choice_text = "Break out the captain's lime reserve (50g)"
+choice_gold_delta = -50
+choice_morale_delta = 0.05
+mitigating_skill = &"leadership"

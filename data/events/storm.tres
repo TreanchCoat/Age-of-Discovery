@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="VoyageEventDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/voyage_event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"storm"
+display_name = "Storm"
+text = "Black clouds swallow the horizon. The sea rises against you."
+tick = "hourly"
+base_chance = 0.04
+requires_at_sea = true
+min_wind_strength = 1.4
+durability_delta = -15
+morale_delta = -0.15
+choice_text = "Heave to and ride it out (lose 6 hours, less damage)"
+choice_durability_delta = -4
+choice_morale_delta = -0.05
+choice_hours_lost = 6
+mitigating_skill = &"navigation"

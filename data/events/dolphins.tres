@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="VoyageEventDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/voyage_event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"dolphins"
+display_name = "Dolphins off the Bow"
+text = "A pod of dolphins races the ship, leaping through the wake. The crew crowds the rail, grinning."
+tick = "daily"
+base_chance = 0.1
+requires_at_sea = true
+morale_delta = 0.15

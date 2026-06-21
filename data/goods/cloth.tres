@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="GoodDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/good_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"cloth"
+display_name = "Cloth"
+category = "textile"
+base_price = 80
+weight_per_unit = 1.0
+perishable = false
+description = "Everyday textile. Modest margins, but steady demand everywhere."

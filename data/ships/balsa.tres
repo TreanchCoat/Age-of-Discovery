@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="ShipDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/ship_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"balsa"
+display_name = "Balsa"
+hull_class = "light"
+base_speed = 8.0
+horizontal_sail_power = 8.0
+vertical_sail_power = 6.0
+vs_wind_penalty = 0.6
+turn_rate = 1.2
+cargo_capacity = 80.0
+max_crew = 12
+max_durability = 80
+description = "A humble starter vessel. Light, nimble, and barely seaworthy."

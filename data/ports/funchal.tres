@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="PortDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/port_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"funchal"
+display_name = "Funchal"
+culture = &"iberian"
+world_position = Vector3(-600, 0, 400)
+size = 2
+produces = Array[StringName]([&"spices"])
+demands = Array[StringName]([&"wine", &"cloth"])
+has_shipyard = false
+description = "Madeira's harbor. First taste of the open ocean."

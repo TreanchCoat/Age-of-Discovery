@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="DiscoveryDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/discovery_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"dragon_rock"
+display_name = "Dragon Rock"
+category = "geography"
+world_position = Vector3(-280, 0, 180)
+spot_radius = 60.0
+difficulty = 8
+fame_category = &"adventure"
+fame_reward = 50
+gold_reward = 100
+lore = "A basalt spire sailors swear breathes smoke at dusk. It is, in fact, seabirds."
