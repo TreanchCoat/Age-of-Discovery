@@ -167,7 +167,7 @@ Bottom-center wheel: a circle with a rotating cross showing the helm (`ship.whee
 
 `world.tscn` is a single Node3D with this script; everything is generated in `_ready()` so the game runs with zero art:
 
-1. Environment (sun + procedural sky), 4000² sea plane.
+1. Environment (sun + procedural sky), and the **FFT ocean** — `_make_sea()` instances `assets/water/ocean.tscn` (realistic GodotOceanWaves port), `_process()` keeps it centred on the ship and drives its cascade wind from WindSystem. The old code-built sea plane is retired. **See `OCEAN_INTEGRATION.md`** for the full ocean architecture, the 4.7 port fixes, and the buoyancy plan.
 2. WindSystem, SupplySystem.
 3. PortArea + greybox box marker per `data/ports/*.tres`; DiscoveryArea per DiscoveryDB def.
 4. Player ship (greybox box hull + chase camera) just off Lisbon; refs kept in `_ship`/`_wind`.
@@ -188,7 +188,12 @@ Replace any piece with a real scene incrementally — e.g. give ShipDef.scene a 
 - **Pause behavior:** modal UIs (events, spyglass) set `get_tree().paused = true` and run with `PROCESS_MODE_ALWAYS`. WorldClock pauses with the tree, so paused time costs nothing.
 - **Input actions** are predefined in `project.godot` (no manual setup): `turn_left` (A), `turn_right` (D), `toggle_horizontal_sail` (F), `toggle_vertical_sail` (G), `observe` (E), `toggle_map` (M). Camera zoom is mouse-wheel, handled directly in ShipController (not an action).
 - **Save data** lives at `user://save.json` (on Windows: `%APPDATA%/Godot/app_userdata/Age of Discovery/`).
+- **Shader globals:** the FFT ocean's shaders use `global uniform`s registered in `project.godot` `[shader_globals]` (`water_color`, `foam_color`, `num_cascades`, `displacements`, `normals`). If the water shader fails to compile saying a global "does not exist", they're missing.
+- **Ocean mesh LODs:** `assets/water/clipmap_*.obj.import` must keep `generate_lods=false`. If a reimport flips it on, the waves flatten into smooth swells (4.7 decimates the clipmap). See `OCEAN_INTEGRATION.md`.
+- **Renderer:** Forward+ / Vulkan. The ocean's compute works on it; `d3d12` is a fallback only.
 
 ## 9. Where to go next
 
-In rough order of value: tavern/quest hooks pointing at discoveries (gives players direction), more content (ports/goods/events are pure data now), a real ocean shader + ship model, port supply/demand affected by world events, then naval combat as an instanced scene, then co-op replication of the State layer.
+**Immediate next: ship buoyancy** — make the ship bob/tilt on the FFT ocean. The ocean is GPU-computed, so this needs the CPU displacement readback re-enabled on the render thread (`RenderingServer.call_on_render_thread`), then `water.gd.get_height(ship_pos)` drives the ship's Y + tilt as a kinematic bob (sailing model untouched). Full plan in `OCEAN_INTEGRATION.md`.
+
+After that, in rough order (see `PROJECT_PLAN.md`): migrate greybox pieces into real `.tscn` scenes (start with the ship — `Ship.tscn`) and a real ship model; tavern/quest hooks pointing at discoveries; more content (ports/goods/events are pure data); fame consumption (titles/privileges); fleet/crew depth; factions; then naval combat as an instanced scene; then co-op replication of the State layer. Presentation: the demo's HDRI sky for the ocean, audio, a designed UI theme.

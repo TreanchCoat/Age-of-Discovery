@@ -1,6 +1,10 @@
 # Age of Discovery (working title)
 
-Singleplayer/co-op reimagining of Uncharted Waters Online in Godot 4.x, GDScript, 3D low-poly.
+Singleplayer/co-op reimagining of Uncharted Waters Online in Godot 4.7, GDScript, 3D low-poly.
+
+> This file is the **vision**. For what's actually built and what's next, see
+> `PROJECT_PLAN.md` (current status + roadmap) and `DOCUMENTATION.md` (technical reference).
+> The sea is a ported **FFT ocean** — details + the buoyancy plan in `OCEAN_INTEGRATION.md`.
 
 ## Vision
 

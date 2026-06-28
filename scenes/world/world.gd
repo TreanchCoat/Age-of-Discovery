@@ -7,6 +7,11 @@ var _status_label: Label
 var _sail_label: Label
 var _ship: ShipController
 var _wind: WindSystem
+var _ocean: Node3D            # the FFT ocean (Water node), instanced from ocean.tscn
+var _ocean_cascades: Array = []   # WaveCascadeParameters, driven from the wind
+var _base_wind_speeds: Array = [] # each cascade's tuned wind_speed (scaled by wind strength)
+var _wind_accum := 0.0
+var ocean_wind_auto := true       # debug panel can turn this off to tune waves by hand
 
 func _ready() -> void:
 	_make_environment()
@@ -39,6 +44,8 @@ func _ready() -> void:
 	debug_ui.wind = wind
 	debug_ui.ship = ship
 	debug_ui.events = events
+	debug_ui.ocean = _ocean
+	debug_ui.world = self
 	add_child(debug_ui)
 	_make_hud()
 
@@ -55,14 +62,29 @@ func _make_environment() -> void:
 	add_child(env)
 
 func _make_sea() -> void:
-	var sea := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(4000, 4000)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.08, 0.25, 0.4)
-	plane.material = mat
-	sea.mesh = plane
-	add_child(sea)
+	# FFT ocean (ported GodotOceanWaves), instanced and made to follow the ship.
+	# load() at runtime (not preload) so an ocean import problem can't break the
+	# whole world script — it would just leave the sea empty.
+	var scene: PackedScene = load("res://assets/water/ocean.tscn")
+	if scene == null:
+		push_warning("ocean.tscn failed to load")
+		return
+	var ocean = scene.instantiate()  # untyped: Water has no class_name, so reach .parameters dynamically
+	add_child(ocean)
+	_ocean = ocean
+	# Cache the cascades + their tuned wind speeds so WindSystem can drive them.
+	for p in ocean.parameters:
+		_ocean_cascades.append(p)
+		_base_wind_speeds.append(p.wind_speed)
+
+func _apply_wind_to_ocean() -> void:
+	if not ocean_wind_auto or _ocean_cascades.is_empty() or _wind == null:
+		return
+	var deg := rad_to_deg(_wind.direction.angle())
+	var strength := clampf(_wind.strength, 0.3, 2.0)  # scale wave size with wind
+	for i in _ocean_cascades.size():
+		_ocean_cascades[i].wind_direction = deg
+		_ocean_cascades[i].wind_speed = _base_wind_speeds[i] * strength
 
 func _spawn_land() -> void:
 	# Greybox landmasses near each city: a solid island (collides + damages) ringed
@@ -148,23 +170,40 @@ func _spawn_discoveries() -> void:
 func _spawn_ship(wind: WindSystem) -> ShipController:
 	var ship := ShipController.new()
 	ship.wind = wind
+	# Visual hull lives under a HullPivot so buoyancy can heave/tilt it WITHOUT
+	# tilting the body (which would corrupt thrust/steering — see ship_buoyancy.gd).
+	var pivot := Node3D.new()
+	pivot.name = "HullPivot"
+	ship.add_child(pivot)
 	# greybox hull
 	var hull := MeshInstance3D.new()
 	var box := BoxMesh.new()
 	box.size = Vector3(4, 3, 12)
 	hull.mesh = box
-	ship.add_child(hull)
+	pivot.add_child(hull)
+	# Collision stays on the body (level), not on the tilting pivot.
 	var col := CollisionShape3D.new()
 	col.shape = BoxShape3D.new()
 	(col.shape as BoxShape3D).size = Vector3(4, 3, 12)
 	ship.add_child(col)
-	# chase camera
+	# chase camera (child of the body: gets neither tilt nor bob)
 	var cam := Camera3D.new()
 	cam.position = Vector3(0, 25, 45)
 	cam.rotation_degrees = Vector3(-25, 0, 0)
 	ship.add_child(cam)
 	ship.position = Vector3(0, 1.5, 60)  # just off Lisbon
 	add_child(ship)
+	# Buoyancy: conform the visual hull to the FFT ocean surface.
+	if _ocean:
+		var buoyancy := ShipBuoyancy.new()
+		buoyancy.name = "Buoyancy"
+		buoyancy.ocean = _ocean
+		buoyancy.hull_pivot = pivot
+		buoyancy.ship = ship
+		buoyancy.wind = wind
+		buoyancy.length = box.size.z
+		buoyancy.beam = box.size.x
+		ship.add_child(buoyancy)
 	return ship
 
 func _make_hud() -> void:
@@ -236,7 +275,16 @@ func _on_discovery_made(id: StringName) -> void:
 	if def:
 		_status_label.text = "DISCOVERY: %s — %s" % [def.display_name, def.lore]
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	# Keep the ocean centred on the ship (snapped to whole units to avoid jitter).
+	if _ocean and _ship:
+		_ocean.global_position = Vector3(roundf(_ship.global_position.x), 0.0, roundf(_ship.global_position.z))
+	# Drive the ocean's wind from WindSystem, throttled — changing it regenerates
+	# the wave spectra, so we don't do it every frame.
+	_wind_accum += delta
+	if _wind_accum >= 0.5:
+		_wind_accum = 0.0
+		_apply_wind_to_ocean()
 	if _ship == null or _sail_label == null:
 		return
 	var f := "%d%%" % roundi(_ship.horizontal_sail * 100.0)

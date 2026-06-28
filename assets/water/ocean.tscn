@@ -1,0 +1,83 @@
+[gd_scene load_steps=15 format=3]
+
+[ext_resource type="Script" path="res://assets/water/wave_cascade_parameters.gd" id="1"]
+[ext_resource type="Material" path="res://assets/water/mat_water.tres" id="2"]
+[ext_resource type="ArrayMesh" path="res://assets/water/clipmap_high.obj" id="3"]
+[ext_resource type="Script" path="res://assets/water/water.gd" id="4"]
+[ext_resource type="Shader" path="res://assets/shaders/spatial/sea_spray.gdshader" id="5"]
+[ext_resource type="Material" path="res://assets/water/mat_spray.tres" id="6"]
+[ext_resource type="Texture2D" path="res://assets/water/sea_spray.png" id="7"]
+
+[sub_resource type="Resource" id="Cascade1"]
+script = ExtResource("1")
+tile_length = Vector2(88, 88)
+displacement_scale = 1.15
+normal_scale = 1.0
+wind_speed = 22.0
+wind_direction = 20.0
+fetch_length = 150.0
+swell = 0.8
+spread = 0.2
+detail = 1.0
+whitecap = 0.35
+foam_amount = 10.0
+
+[sub_resource type="Resource" id="Cascade2"]
+script = ExtResource("1")
+tile_length = Vector2(57, 57)
+displacement_scale = 0.9
+normal_scale = 1.0
+wind_speed = 16.0
+wind_direction = 15.0
+fetch_length = 150.0
+swell = 0.8
+spread = 0.4
+detail = 1.0
+whitecap = 0.35
+foam_amount = 6.0
+
+[sub_resource type="Resource" id="Cascade3"]
+script = ExtResource("1")
+tile_length = Vector2(16, 16)
+displacement_scale = 0.0
+normal_scale = 0.3
+wind_speed = 24.0
+wind_direction = 20.0
+fetch_length = 550.0
+swell = 0.8
+spread = 0.4
+detail = 1.0
+whitecap = 0.2
+foam_amount = 6.0
+
+[sub_resource type="FastNoiseLite" id="Noise1"]
+
+[sub_resource type="NoiseTexture2D" id="NoiseTex1"]
+seamless = true
+noise = SubResource("Noise1")
+
+[sub_resource type="ShaderMaterial" id="SprayMat"]
+render_priority = -1
+shader = ExtResource("5")
+shader_parameter/max_alpha = 0.666
+shader_parameter/albedo_texture = ExtResource("7")
+shader_parameter/dissolve_texture = SubResource("NoiseTex1")
+
+[sub_resource type="QuadMesh" id="Quad1"]
+
+[node name="Water" type="MeshInstance3D"]
+sorting_offset = 999.0
+material_override = ExtResource("2")
+cast_shadow = 0
+mesh = ExtResource("3")
+script = ExtResource("4")
+parameters = Array[ExtResource("1")]([SubResource("Cascade1"), SubResource("Cascade2"), SubResource("Cascade3")])
+
+[node name="WaterSprayEmitter" type="GPUParticles3D" parent="."]
+transform = Transform3D(15, 0, 0, 0, 15, 0, 0, 0, 15, 0, 0, 0)
+material_override = SubResource("SprayMat")
+cast_shadow = 0
+amount = 32768
+lifetime = 6.0
+process_material = ExtResource("6")
+draw_pass_1 = SubResource("Quad1")

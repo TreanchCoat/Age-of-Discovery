@@ -85,9 +85,8 @@ func _on_undock() -> void:
 func set_at_sea(active: bool) -> void:
 	set_physics_process(active)
 	set_process_unhandled_input(active)
-	for child in get_children():
-		if child is MeshInstance3D:
-			child.visible = active
+	# Hide every hull mesh, including those nested under the buoyancy HullPivot.
+	_set_meshes_visible(self, active)
 	if not active:
 		horizontal_sail = 0.0
 		horizontal_sail_target = 0.0
@@ -97,6 +96,13 @@ func set_at_sea(active: bool) -> void:
 		wheel = 0.0
 		pace = 0.5
 		velocity = Vector3.ZERO
+
+## Toggle visibility of all MeshInstance3D descendants (hull may be nested under HullPivot).
+func _set_meshes_visible(node: Node, v: bool) -> void:
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			child.visible = v
+		_set_meshes_visible(child, v)
 
 func _physics_process(delta: float) -> void:
 	var state := GameState.ship

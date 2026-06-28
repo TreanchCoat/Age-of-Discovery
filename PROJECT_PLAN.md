@@ -20,6 +20,22 @@ Almost every *system* for this already exists in greybox. The demo is mostly abo
 
 ---
 
+## Current status (kept up to date)
+
+Engine is now **Godot 4.7**. Much of the "feel like a world" work is done. Built since this plan was written:
+
+- **Sailing:** two-sail model (horizontal/square + vertical/fore-aft), steering-wheel helm with momentum + minimum steerage, pace (50→100%) affecting speed & turning, gradual sail furl. Drifting wind (direction + strength).
+- **World:** the **FFT ocean** is integrated (realistic *GodotOceanWaves* port — see `OCEAN_INTEGRATION.md`): follows the ship, wind-driven. Landmasses + coastline collision (slide + hull damage); shallow-water zones (slow + scrape).
+- **Loop:** dock/undock with "Voyage Successful" + centred market (3 goods, per-visit price variation), supplies/morale, voyage events (storm/scurvy/dolphins), discovery + spyglass minigame.
+- **Instruments/UI:** HUD readout, minimap (+ wind arrow), compass, helm dial, world map (fog of war), and a **debug panel** (backtick) — wind, teleport, ship/gold, time/events, and **live ocean wave tuning**.
+- **Ship health:** hull durability + collision damage.
+
+**Immediate next:** ship **buoyancy** — bob/tilt on the FFT waves (plan in `OCEAN_INTEGRATION.md`).
+
+**Still greybox / not done:** ship/ports/UI are built in code, not real `.tscn` scenes or art (the M2 "real ship model" + scene-migration work); menus, audio, save-slots, and the guided objective + summary screen (M4/M5). The milestones below remain the roadmap.
+
+---
+
 ## 2. How to work together (read this once)
 
 You're 2–3 people in one Godot project. The single biggest source of pain will be **merge conflicts in scene files**, so a little discipline up front saves weekends later.
