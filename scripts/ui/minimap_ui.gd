@@ -7,6 +7,9 @@ extends Control
 var ship: Node3D
 var wind: WindSystem
 @export var range_units := 1400.0   # world units from map center to its edge
+@export var map_texture: Texture2D = null      # terrain image drawn as the background
+@export var world_size := Vector2(3236.0, 4000.0)  # world units the map texture spans (X,Z)
+@export var world_center := Vector2(0.0, 0.0)      # world XZ at the centre of the map texture
 
 var _ports: Array[PortDef] = []
 
@@ -28,8 +31,17 @@ func _draw() -> void:
 	var radius := minf(size.x, size.y) / 2.0 - 4.0
 	var pps := radius / range_units   # pixels per world unit
 
-	# Panel background + border
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.05, 0.08, 0.12, 0.75))
+	# Background: the terrain map, windowed to the area around the ship (north-up),
+	# so you can read your position against the real coastline. Falls back to a panel.
+	draw_rect(Rect2(Vector2.ZERO, size), Color(0.05, 0.08, 0.12, 0.85))
+	if ship and map_texture:
+		var sp0 := ship.global_position
+		var tex := Vector2(map_texture.get_size())
+		var win := range_units * 2.0
+		var u0 := (sp0.x - range_units - world_center.x) / world_size.x + 0.5
+		var v0 := (sp0.z - range_units - world_center.y) / world_size.y + 0.5
+		var src := Rect2(u0 * tex.x, v0 * tex.y, (win / world_size.x) * tex.x, (win / world_size.y) * tex.y)
+		draw_texture_rect_region(map_texture, Rect2(Vector2.ZERO, size), src, Color(1, 1, 1, 0.85))
 	draw_rect(Rect2(Vector2.ZERO, size), Color(0.9, 0.9, 0.85, 0.5), false, 2.0)
 
 	if ship == null:

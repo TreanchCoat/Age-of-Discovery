@@ -8,10 +8,7 @@ var _sail_label: Label
 var _ship: ShipController
 var _wind: WindSystem
 var _ocean: Node3D            # the FFT ocean (Water node), instanced from ocean.tscn
-var _ocean_cascades: Array = []   # WaveCascadeParameters, driven from the wind
-var _base_wind_speeds: Array = [] # each cascade's tuned wind_speed (scaled by wind strength)
-var _wind_accum := 0.0
-var ocean_wind_auto := true       # debug panel can turn this off to tune waves by hand
+var _far_ocean: MeshInstance3D  # low-detail far ring sharing the water material (256..~2048)
 
 func _ready() -> void:
 	_make_environment()
@@ -21,6 +18,7 @@ func _ready() -> void:
 	wind.name = "Wind"
 	add_child(wind)
 	_wind = wind
+	wind.register_ocean(_ocean)   # one wind drives both ship speed and the waves
 	add_child(SupplySystem.new())
 	_spawn_ports()
 	_spawn_discoveries()
@@ -29,6 +27,7 @@ func _ready() -> void:
 	add_child(PortMarketUI.new())
 	var map := WorldMapUI.new()
 	add_child(map)
+	map.map_texture = load("res://assets/terrain/region_preview.png")
 	map.register_ship(ship)
 	var events := VoyageEventSystem.new()
 	events.wind = wind
@@ -72,26 +71,33 @@ func _make_sea() -> void:
 	var ocean = scene.instantiate()  # untyped: Water has no class_name, so reach .parameters dynamically
 	add_child(ocean)
 	_ocean = ocean
-	# Cache the cascades + their tuned wind speeds so WindSystem can drive them.
-	for p in ocean.parameters:
-		_ocean_cascades.append(p)
-		_base_wind_speeds.append(p.wind_speed)
-
-func _apply_wind_to_ocean() -> void:
-	if not ocean_wind_auto or _ocean_cascades.is_empty() or _wind == null:
-		return
-	var deg := rad_to_deg(_wind.direction.angle())
-	var strength := clampf(_wind.strength, 0.3, 2.0)  # scale wave size with wind
-	for i in _ocean_cascades.size():
-		_ocean_cascades[i].wind_direction = deg
-		_ocean_cascades[i].wind_speed = _base_wind_speeds[i] * strength
+	# Far ocean: a big low-density mesh that samples the SAME FFT wave maps (global
+	# shader uniforms) via the same material, so it extends the sea to ~2048 units
+	# without a second wave simulation. Sits slightly below so the high-detail clipmap
+	# wins where they overlap (inner 256).
+	var far := MeshInstance3D.new()
+	far.name = "FarOcean"
+	far.mesh = load("res://assets/water/clipmap_low.obj")
+	far.material_override = load("res://assets/water/mat_water.tres")
+	far.scale = Vector3(8.0, 1.0, 8.0)   # clipmap is +/-256 -> +/-2048
+	far.position.y = -0.2
+	far.extra_cull_margin = 4096.0       # huge AABB after scaling; avoid wrongly culling it
+	add_child(far)
+	_far_ocean = far
 
 func _spawn_land() -> void:
 	# Greybox landmasses near each city: a solid island (collides + damages) ringed
 	# by a shallow-water band (slows + slowly scrapes the hull). Positioned clear of
 	# each port's dock circle and the approach lane between the two cities.
-	_make_landmass(Vector3(0, 0, -160), 100.0, 55.0)      # coast north of Lisbon
-	_make_landmass(Vector3(-730, 0, 510), 95.0, 50.0)     # coast southwest of Funchal
+	# Real terrain from the GEBCO heightmap crop (Iberia / Madeira). Sea level = y 0.
+	var terrain := HeightmapTerrain.new()
+	terrain.name = "Terrain"
+	add_child(terrain)
+	# Tell the ocean shader where land is, so waves are not drawn over the terrain.
+	var wm := load("res://assets/water/mat_water.tres") as ShaderMaterial
+	if wm:
+		wm.set_shader_parameter("terrain_landmask", load("res://assets/terrain/region_landmask.png"))
+		wm.set_shader_parameter("terrain_rect", Vector4(0.0, 0.0, terrain.world_size.x, terrain.world_size.y))
 
 func _make_landmass(center: Vector3, radius: float, shallow_width: float) -> void:
 	var shallow_r := radius + shallow_width
@@ -175,12 +181,42 @@ func _spawn_ship(wind: WindSystem) -> ShipController:
 	var pivot := Node3D.new()
 	pivot.name = "HullPivot"
 	ship.add_child(pivot)
-	# greybox hull
-	var hull := MeshInstance3D.new()
+	# Visual hull: the imported ship model if present, else the greybox box.
+	# Uses the cleaned mesh (stray "Plane" group stripped); it is ~4965u long and off-origin,
+	# so we centre it on the pivot and scale to ~12 world units. All four are tunable.
+	var ship_model_path := "res://assets/ships/medieval_boat.obj"
+	var ship_model_texture := "res://assets/ships/Wood 2.JPG"  # the real wood texture (Medieval Boat.jpg is a blue render preview)
+	var ship_model_scale := 0.0024    # ~4965u long -> ~12 world units
+	var ship_model_yaw_deg := 180.0   # bow forward (model is authored facing astern)
+	var ship_model_y := -1.5          # keel height vs the hull pivot (raise/lower to sit in the water)
 	var box := BoxMesh.new()
-	box.size = Vector3(4, 3, 12)
-	hull.mesh = box
-	pivot.add_child(hull)
+	box.size = Vector3(4, 3, 12)   # also the collision + buoyancy footprint below
+	var model_mesh := load(ship_model_path) as Mesh
+	var hull := MeshInstance3D.new()
+	if model_mesh:
+		# Yaw on a wrapper so rotating the bow keeps the centred model centred.
+		var yaw := Node3D.new()
+		yaw.name = "HullYaw"
+		yaw.rotation_degrees = Vector3(0.0, ship_model_yaw_deg, 0.0)
+		pivot.add_child(yaw)
+		hull.mesh = model_mesh
+		hull.scale = Vector3.ONE * ship_model_scale
+		var aabb := model_mesh.get_aabb()
+		var c := aabb.position + aabb.size * 0.5
+		# Centre X/Z on the pivot; rest the keel (min Y) at ship_model_y.
+		hull.position = Vector3(-c.x * ship_model_scale, ship_model_y - aabb.position.y * ship_model_scale, -c.z * ship_model_scale)
+		var tex := load(ship_model_texture) as Texture2D
+		if tex:
+			var mat := StandardMaterial3D.new()
+			mat.albedo_texture = tex
+			mat.roughness = 0.9   # matte wood; stops the blue sky reflecting off the hull
+			mat.metallic = 0.0
+			hull.material_override = mat
+		yaw.add_child(hull)
+	else:
+		hull.mesh = box
+		pivot.add_child(hull)
+		push_warning("ship model not found at %s — using greybox box" % ship_model_path)
 	# Collision stays on the body (level), not on the tilting pivot.
 	var col := CollisionShape3D.new()
 	col.shape = BoxShape3D.new()
@@ -191,7 +227,7 @@ func _spawn_ship(wind: WindSystem) -> ShipController:
 	cam.position = Vector3(0, 25, 45)
 	cam.rotation_degrees = Vector3(-25, 0, 0)
 	ship.add_child(cam)
-	ship.position = Vector3(0, 1.5, 60)  # just off Lisbon
+	ship.position = Vector3(818, 1.5, -900)  # open water just off Lisbon
 	add_child(ship)
 	# Buoyancy: conform the visual hull to the FFT ocean surface.
 	if _ocean:
@@ -232,6 +268,8 @@ func _make_hud() -> void:
 	minimap.name = "Minimap"
 	minimap.ship = _ship
 	minimap.wind = _wind
+	minimap.map_texture = load("res://assets/terrain/region_preview.png")
+	minimap.world_size = Vector2(3236.0, 4000.0)
 	minimap.anchor_left = 1.0
 	minimap.anchor_right = 1.0
 	minimap.anchor_top = 0.0
@@ -279,12 +317,8 @@ func _process(delta: float) -> void:
 	# Keep the ocean centred on the ship (snapped to whole units to avoid jitter).
 	if _ocean and _ship:
 		_ocean.global_position = Vector3(roundf(_ship.global_position.x), 0.0, roundf(_ship.global_position.z))
-	# Drive the ocean's wind from WindSystem, throttled — changing it regenerates
-	# the wave spectra, so we don't do it every frame.
-	_wind_accum += delta
-	if _wind_accum >= 0.5:
-		_wind_accum = 0.0
-		_apply_wind_to_ocean()
+	if _far_ocean and _ship:
+		_far_ocean.global_position = Vector3(roundf(_ship.global_position.x), -0.2, roundf(_ship.global_position.z))
 	if _ship == null or _sail_label == null:
 		return
 	var f := "%d%%" % roundi(_ship.horizontal_sail * 100.0)

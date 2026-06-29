@@ -51,6 +51,7 @@ func _on_event(def: VoyageEventDef) -> void:
 	_choice_btn.visible = def.choice_text != ""
 	_choice_btn.text = def.choice_text
 	_panel.show()
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE  # cursor may be captured from camera orbit
 	get_tree().paused = true
 
 func _close() -> void:

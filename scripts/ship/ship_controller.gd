@@ -18,7 +18,7 @@ const PACE_GAIN := 0.05         # speed fraction regained per second while saili
 const PACE_TURN_LOSS := 0.08    # speed fraction bled per second while actively turning
 const SAIL_CHANGE_RATE := 0.5   # how fast a sail raises/furls (per sec); furling decays thrust
 const ZOOM_STEP := 0.12         # camera zoom change per mouse-wheel notch
-const ZOOM_MIN := 0.5           # closest (0.5x the default chase offset)
+const ZOOM_MIN := 0.3           # closest (0.3x the default chase offset)
 const ZOOM_MAX := 2.5           # farthest
 const SHALLOW_SPEED_MULT := 0.5     # how much shallows slow you (0.5 = half speed)
 const SHALLOW_DAMAGE_PER_SEC := 1.5 # hull lost per second while scraping shallows
@@ -39,6 +39,17 @@ var _cam_base := Vector3.ZERO  # default chase-camera offset; scaled by zoom
 var _zoom := 1.0
 var _shallow_zones := 0        # how many shallow-water areas the ship is inside
 var _scrape_accum := 0.0       # fractional hull damage waiting to be applied
+var _cam_yaw := 0.0            # orbit angle around the ship (0 = astern = default)
+var _cam_pitch := 29.0         # camera elevation; derived from _cam_base in _ready
+var _cam_radius := 50.0        # distance from the ship; derived from _cam_base in _ready
+var _cam_pitch_default := 29.0 # remembered for the middle-click reset
+var _cam_focus_height := 4.0   # aim a few units above the hull, not the waterline
+var _orbiting := false
+var _cam_resetting := false    # middle-click eases the camera home over ~1s instead of snapping
+const CAM_RESET_RATE := 4.0    # higher = snappier return (≈1.2s to settle)
+const CAM_ORBIT_SENS := 0.3    # degrees of orbit per pixel of mouse drag
+const CAM_PITCH_MIN := 5.0     # keep the camera off the poles to avoid gimbal flip
+const CAM_PITCH_MAX := 85.0
 
 func enter_shallows() -> void:
 	_shallow_zones += 1
@@ -56,6 +67,15 @@ func _ready() -> void:
 			_camera = child
 			_cam_base = child.position
 			break
+	if _camera:
+		# Turn the authored offset into yaw/pitch/radius so right-drag orbits that same
+		# framing and middle-click snaps back to it.
+		_cam_radius = _cam_base.length()
+		if _cam_radius > 0.001:
+			_cam_pitch = rad_to_deg(asin(clampf(_cam_base.y / _cam_radius, -1.0, 1.0)))
+		_cam_pitch_default = _cam_pitch
+		_cam_yaw = 0.0
+		_update_camera()
 
 func _on_dock(_port_id: StringName) -> void:
 	set_at_sea(false)
@@ -96,6 +116,9 @@ func set_at_sea(active: bool) -> void:
 		wheel = 0.0
 		pace = 0.5
 		velocity = Vector3.ZERO
+		# Drop any in-progress camera orbit so the cursor is free for the port UI.
+		_orbiting = false
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 ## Toggle visibility of all MeshInstance3D descendants (hull may be nested under HullPivot).
 func _set_meshes_visible(node: Node, v: bool) -> void:
@@ -133,9 +156,12 @@ func _physics_process(delta: float) -> void:
 	else:
 		pace = minf(pace + PACE_GAIN * delta, 1.0)
 
-	# Turning scales with speed, but never drops below MIN_STEERAGE so a stalled
-	# ship can always crawl its bow off the wind instead of getting stuck in irons.
-	var turn_factor := clampf(current_speed / 4.0, MIN_STEERAGE, 1.0)
+	# Turning needs steerageway. With any sail set (or way still on) we keep a
+	# MIN_STEERAGE floor so a stalled ship can crawl its bow off the wind instead of
+	# getting stuck in irons. But dead in the water with both sails fully furled there
+	# is no flow over the rudder, so she will not answer the helm at all.
+	var dead_in_water := current_speed < 0.1 and horizontal_sail < 0.01 and vertical_sail < 0.01
+	var turn_factor := 0.0 if dead_in_water else clampf(current_speed / 4.0, MIN_STEERAGE, 1.0)
 	rotate_y(wheel * state.def.turn_rate * delta * turn_factor * pace)
 
 	# Speed: each raised sail adds power scaled by how well it suits the wind angle.
@@ -178,17 +204,67 @@ func _unhandled_input(event: InputEvent) -> void:
 		vertical_sail_target = 0.0 if vertical_sail_target > 0.5 else 1.0
 	if event.is_action_pressed("observe") and use_fallback_observe:
 		_try_observe()
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_apply_zoom(-ZOOM_STEP)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_apply_zoom(ZOOM_STEP)
+	if event is InputEventMouseButton:
+		match event.button_index:
+			MOUSE_BUTTON_WHEEL_UP:
+				if event.pressed: _apply_zoom(-ZOOM_STEP)
+			MOUSE_BUTTON_WHEEL_DOWN:
+				if event.pressed: _apply_zoom(ZOOM_STEP)
+			MOUSE_BUTTON_RIGHT:
+				# Hold right mouse to orbit the camera around the ship.
+				if event.pressed: _cam_resetting = false
+				_orbiting = event.pressed
+				Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if event.pressed else Input.MOUSE_MODE_VISIBLE
+			MOUSE_BUTTON_MIDDLE:
+				if event.pressed: _reset_camera()
+	elif event is InputEventMouseMotion and _orbiting:
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+			# Release was swallowed (e.g. a modal paused us mid-orbit) — recover.
+			_orbiting = false
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+			return
+		_cam_yaw = wrapf(_cam_yaw - event.relative.x * CAM_ORBIT_SENS, -180.0, 180.0)
+		_cam_pitch = clampf(_cam_pitch - event.relative.y * CAM_ORBIT_SENS, CAM_PITCH_MIN, CAM_PITCH_MAX)
+		_update_camera()
 
 func _apply_zoom(amount: float) -> void:
 	if _camera == null:
 		return
+	_cam_resetting = false
 	_zoom = clampf(_zoom + amount, ZOOM_MIN, ZOOM_MAX)
-	_camera.position = _cam_base * _zoom
+	_update_camera()
+
+## Place the chase camera on its orbit (yaw/pitch/radius * zoom) and aim it at the ship.
+## The camera is a child of the ship, so this offset rotates with the hull heading; the
+## framing is preserved as the ship turns without needing a per-frame update.
+func _update_camera() -> void:
+	if _camera == null:
+		return
+	var p := deg_to_rad(_cam_pitch)
+	var y := deg_to_rad(_cam_yaw)
+	var r := _cam_radius * _zoom
+	_camera.position = Vector3(sin(y) * cos(p), sin(p), cos(y) * cos(p)) * r
+	_camera.look_at(global_position + Vector3.UP * _cam_focus_height, Vector3.UP)
+
+## Middle-click: ease the camera back to its default framing and zoom over ~1s.
+func _reset_camera() -> void:
+	_cam_resetting = true
+
+## Drives the smooth camera return started by _reset_camera().
+func _process(delta: float) -> void:
+	if not _cam_resetting:
+		return
+	var k := 1.0 - exp(-CAM_RESET_RATE * delta)
+	_cam_yaw = lerp(_cam_yaw, 0.0, k)
+	_cam_pitch = lerp(_cam_pitch, _cam_pitch_default, k)
+	_zoom = lerp(_zoom, 1.0, k)
+	_update_camera()
+	if absf(_cam_yaw) < 0.05 and absf(_cam_pitch - _cam_pitch_default) < 0.05 and absf(_zoom - 1.0) < 0.001:
+		_cam_yaw = 0.0
+		_cam_pitch = _cam_pitch_default
+		_zoom = 1.0
+		_update_camera()
+		_cam_resetting = false
 
 func _try_observe() -> void:
 	# Attempt to confirm any spotted discovery still in range.

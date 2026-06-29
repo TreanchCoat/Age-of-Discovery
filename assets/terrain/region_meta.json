@@ -1,0 +1,22 @@
+{
+  "bbox": {
+    "lon_w": -18.8,
+    "lon_e": -6.8,
+    "lat_s": 30.0,
+    "lat_n": 42.0
+  },
+  "src_cells": [
+    2880,
+    2880
+  ],
+  "min_m": -5921,
+  "max_m": 4038,
+  "sealevel_value": 5921,
+  "x_aspect": 0.8090169943749475,
+  "note": "heightmap stores (elev_m - min_m); 1 unit=1m; sea-level pixel = -min_m",
+  "grid_n": 513,
+  "world_size": [
+    3236.0,
+    4000.0
+  ]
+}

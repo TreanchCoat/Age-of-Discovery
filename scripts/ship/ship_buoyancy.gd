@@ -72,10 +72,10 @@ func _physics_process(delta: float) -> void:
 	var hl := length * 0.5
 	var hb := beam * 0.5
 
-	var bow := ocean.get_height(origin + fwd * hl)
-	var stern := ocean.get_height(origin - fwd * hl)
-	var star := ocean.get_height(origin + right * hb)
-	var port := ocean.get_height(origin - right * hb)
+	var bow: float = ocean.get_height(origin + fwd * hl)
+	var stern: float = ocean.get_height(origin - fwd * hl)
+	var star: float = ocean.get_height(origin + right * hb)
+	var port: float = ocean.get_height(origin - right * hb)
 
 	var avg := (bow + stern + star + port) * 0.25
 	var lim := deg_to_rad(max_tilt_deg)

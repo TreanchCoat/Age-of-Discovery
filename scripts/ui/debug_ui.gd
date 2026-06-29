@@ -138,6 +138,11 @@ func _build_ocean_section(vbox: VBoxContainer) -> void:
 	cas.item_selected.connect(_on_ocean_cascade)
 	vbox.add_child(cas)
 
+	# Global wave-height knob (all cascades at once) — the easy "make waves bigger" dial.
+	_labeled_slider(vbox, "wave size (all)", 0.0, 3.0, 0.05, wind.wave_size, wind.set_wave_size)
+	# Calibration: rotate the waves to line up with the minimap wind arrow.
+	_labeled_slider(vbox, "wave dir offset\u00b0", -180.0, 180.0, 5.0, wind.wave_angle_offset_deg, wind.set_wave_angle_offset)
+
 	for p in OCEAN_PARAMS:
 		var pname := String(p[0])
 		var row := HBoxContainer.new()
@@ -187,6 +192,32 @@ func _build_ocean_section(vbox: VBoxContainer) -> void:
 	vbox.add_child(spray_chk)
 
 	_refresh_ocean()
+
+## Build a labeled HSlider row with a live value readout. on_change(value:float) is
+## called whenever the slider moves.
+func _labeled_slider(parent: Node, text: String, lo: float, hi: float, step: float, start: float, on_change: Callable) -> void:
+	var row := HBoxContainer.new()
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.custom_minimum_size = Vector2(140, 0)
+	row.add_child(lbl)
+	var sl := HSlider.new()
+	sl.min_value = lo
+	sl.max_value = hi
+	sl.step = step
+	sl.value = start
+	sl.custom_minimum_size = Vector2(180, 0)
+	sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var val := Label.new()
+	val.custom_minimum_size = Vector2(50, 0)
+	val.text = "%.2f" % start
+	var cb := func(v):
+		val.text = "%.2f" % v
+		on_change.call(v)
+	sl.value_changed.connect(cb)
+	row.add_child(sl)
+	row.add_child(val)
+	parent.add_child(row)
 
 func _header(parent: Node, text: String) -> void:
 	var l := Label.new()
@@ -245,8 +276,8 @@ func _force_event() -> void:
 # --- Ocean handlers ---
 
 func _on_ocean_auto(pressed: bool) -> void:
-	if world:
-		world.ocean_wind_auto = pressed
+	if wind:
+		wind.drive_waves = pressed   # single wind system now owns the wave coupling
 
 func _on_ocean_cascade(idx: int) -> void:
 	_cascade_index = idx

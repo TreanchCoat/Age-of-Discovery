@@ -26,6 +26,10 @@ global uniform uint num_cascades;
 global uniform sampler2DArray displacements;         // Each layer represents one wave cascade.
 global uniform sampler2DArray normals : hint_normal; // Each layer represents one wave cascade.
 
+// Terrain land mask: discard ocean fragments that fall over land (above sea level).
+uniform sampler2D terrain_landmask : repeat_disable, filter_linear;
+uniform vec4 terrain_rect = vec4(0.0, 0.0, 1.0, 1.0); // (centre.x, centre.z, size.x, size.z)
+
 
 varying float wave_height;
 varying float foam_factor;
@@ -36,9 +40,9 @@ void vertex() {
 	// is optimized: first check if the distance is greater than 150 meters.
 	// if so, then don't calculate the displacement.
 	float distance_cam = length(VERTEX.xz - CAMERA_POSITION_WORLD.xz);
-	if (distance_cam < 1024.0) // fall of to 0 at 600 meters
+	if (distance_cam < 2048.0) // waves out to the far ocean ring
 	{
-		float distance_factor = min(exp(-(distance_cam-512.0)*0.007), 1.0); // Displacement amonut falls off after 256m.
+		float distance_factor = min(exp(-(distance_cam-1024.0)*0.003), 1.0); // full to ~1024m, gently fading toward 2048m
 
 		// Read displacements from displacement maps.
 		vec3 displacement = vec3(0);
@@ -87,6 +91,12 @@ vec4 texture_bicubic(in sampler2DArray sampler, in vec3 uvw) {
 }
 
 void fragment() {
+	// UV holds world XZ (set in vertex). Skip water where the terrain is land.
+	vec2 _mask_uv = (UV - terrain_rect.xy) / terrain_rect.zw + vec2(0.5);
+	if (_mask_uv.x >= 0.0 && _mask_uv.x <= 1.0 && _mask_uv.y >= 0.0 && _mask_uv.y <= 1.0
+		&& texture(terrain_landmask, _mask_uv).r > 0.5) {
+		discard;
+	}
 	float map_size = float(textureSize(normals, 0).x);
 	float dist = length(VERTEX.xz);
 	// Read foam and normal information from normal maps.

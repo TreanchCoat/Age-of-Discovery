@@ -29,11 +29,16 @@ Two locations:
   `num_cascades` (uint), `displacements`, `normals` (sampler2DArray). **Required** — the
   shaders declare these `global uniform`s; `water.gd` feeds them at runtime, but they must
   be *registered* here or the surface shader won't compile.
-- **`world.gd`** — `_make_sea()` `load()`s `ocean.tscn`, instances it, caches the cascades.
-  `_process()` (a) keeps the ocean centred on the ship (snaps its position each frame so
-  the dense clipmap is always under you; waves are world-space so they don't slide) and
-  (b) drives the cascades' wind from `WindSystem`, **throttled to 0.5 s** (changing wind
-  regenerates the spectra). The `ocean_wind_auto` flag gates this; the debug panel toggles it.
+- **`world.gd`** — `_make_sea()` `load()`s `ocean.tscn`, instances it, hands it to the wind
+  via `wind.register_ocean(_ocean)`, and `_process()` keeps the ocean centred on the ship
+  (snaps its position each frame so the dense clipmap is always under you; waves are
+  world-space so they don't slide).
+- **`WindSystem`** (`scripts/systems/wind_system.gd`) is now the *single* wind: it sets
+  ship speed (via `alignment()`/`strength`) **and** drives the ocean. `register_ocean()`
+  caches each cascade's tuned `wind_speed` as a calm baseline; its `_process()` syncs
+  `wind_direction` + `wind_speed = baseline * strength` to every cascade, **throttled to
+  0.5 s** (changing wind regenerates the spectra). The `drive_waves` flag gates this; the
+  debug panel toggles it.
 - **Debug panel** (`scripts/ui/debug_ui.gd`, backtick `` ` ``) → **"Ocean waves"** section:
   cascade selector, sliders (`wind_speed/wind_direction/fetch_length/swell/spread/detail/
   whitecap/foam_amount/displacement_scale`), resolution + mesh_quality dropdowns, sea-spray
