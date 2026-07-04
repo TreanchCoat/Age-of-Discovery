@@ -3,12 +3,18 @@ extends Node3D
 ## entirely from code so the project runs before any art exists.
 ## Replace pieces with real scenes as they're made.
 
+const SHIP_SCENE := preload("res://scenes/ship/ship.tscn")
+const PORT_SCENE := preload("res://scenes/port/port.tscn")
+const DEFAULT_SPAWN := Vector3(818, 1.5, -900)  # open water just off Lisbon
+
 var _status_label: Label
 var _sail_label: Label
 var _ship: ShipController
 var _wind: WindSystem
 var _ocean: Node3D            # the FFT ocean (Water node), instanced from ocean.tscn
 var _far_ocean: MeshInstance3D  # low-detail far ring sharing the water material (256..~2048)
+var _cities := {}               # port_id -> CityScene instance
+var _ambience: AudioStreamPlayer
 
 func _ready() -> void:
 	_make_environment()
@@ -46,7 +52,71 @@ func _ready() -> void:
 	debug_ui.ocean = _ocean
 	debug_ui.world = self
 	add_child(debug_ui)
+	var pause := PauseMenu.new()
+	pause.world = self
+	add_child(pause)
+	var objectives := ObjectiveSystem.new()
+	add_child(objectives)
+	var objective_ui := ObjectiveUI.new()
+	objective_ui.system = objectives
+	add_child(objective_ui)
+	_make_audio()
+	# Autosave every time we dock (current_port is set before this signal fires).
+	EventBus.port_entered.connect(func(_p): autosave())
+	# Market UI "Enter the city" -> street mode; "Return to ship" -> ship camera.
+	EventBus.city_enter_requested.connect(_on_city_enter_requested)
+	EventBus.city_left.connect(_on_city_left)
 	_make_hud()
+	# If the save was made while docked, current_port is set but no port_entered
+	# ever fired this session — the game would be stuck "half-docked" (market
+	# closed, dock prompts suppressed everywhere). Re-emit it deferred (so every
+	# UI above has connected) to restore the docked state properly.
+	if GameState.current_port != &"":
+		EventBus.port_entered.emit.call_deferred(GameState.current_port)
+
+func _on_city_enter_requested(city_id: StringName) -> void:
+	var city: CityScene = _cities.get(city_id)
+	if city:
+		city.enter_street_mode()  # CityPlayer's camera takes over
+		_fade_ambience(-60.0)     # the sea falls quiet in the streets
+
+func _on_city_left(_city_id: StringName) -> void:
+	# Hand the view back to the ship's chase camera (market UI reopens itself).
+	if _ship:
+		var cam := _ship.get_node_or_null(^"Camera") as Camera3D
+		if cam:
+			cam.make_current()
+	_fade_ambience(-6.0)
+
+## Snapshot ship position into flags, then save everything. Called on docking
+## and from the pause menu's "Save & Main Menu".
+func autosave() -> void:
+	if _ship:
+		var p := _ship.global_position
+		GameState.flags["ship_pos"] = [p.x, p.y, p.z]
+	GameState.save_game()
+
+func _make_audio() -> void:
+	# Ocean ambience. Loops (loop mode set in the .wav import options).
+	# Keeps playing through pause menus (PROCESS_MODE_ALWAYS) — the sea never stops.
+	var stream := load("res://assets/ocean_loop.wav") as AudioStream
+	if stream == null:
+		push_warning("ocean_loop.wav failed to load")
+		return
+	var player := AudioStreamPlayer.new()
+	player.name = "OceanAmbience"
+	player.stream = stream
+	player.volume_db = -6.0
+	player.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(player)
+	player.play()
+	_ambience = player
+
+## Fade the ocean loop (e.g. out when walking the city, back when returning).
+func _fade_ambience(to_db: float, duration := 0.8) -> void:
+	if _ambience == null:
+		return
+	create_tween().tween_property(_ambience, "volume_db", to_db, duration)
 
 func _make_environment() -> void:
 	var sun := DirectionalLight3D.new()
@@ -149,6 +219,8 @@ func _make_landmass(center: Vector3, radius: float, shallow_width: float) -> voi
 	add_child(land)
 
 func _spawn_ports() -> void:
+	# Ports are a scene now (scenes/port/port.tscn): PortArea + marker + name
+	# label. One instance per PortDef; the def drives position and label.
 	var dir := DirAccess.open("res://data/ports")
 	if dir == null:
 		return
@@ -156,16 +228,18 @@ func _spawn_ports() -> void:
 		if not file.ends_with(".tres"):
 			continue
 		var def := load("res://data/ports/" + file) as PortDef
-		var area := PortArea.new()
-		area.def = def
-		add_child(area)
-		# greybox marker
-		var marker := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = Vector3(20, 30, 20)
-		marker.mesh = box
-		marker.position = def.world_position + Vector3.UP * 15
-		add_child(marker)
+		var port: PortArea = PORT_SCENE.instantiate()
+		port.def = def
+		add_child(port)
+		# If this port has a city scene, instance it at the port (sea-view mode:
+		# skyline visible from the water, StreetLevel disabled until docking
+		# flow calls enter_street_mode() — future work).
+		var city_path := "res://scenes/city/city_%s.tscn" % String(def.id)
+		if ResourceLoader.exists(city_path):
+			var city: CityScene = (load(city_path) as PackedScene).instantiate()
+			city.position = def.world_position
+			add_child(city)
+			_cities[def.id] = city
 
 func _spawn_discoveries() -> void:
 	for def in DiscoveryDB.all_defs():
@@ -174,72 +248,29 @@ func _spawn_discoveries() -> void:
 		add_child(area)
 
 func _spawn_ship(wind: WindSystem) -> ShipController:
-	var ship := ShipController.new()
+	# The ship is now a proper scene (scenes/ship/ship.tscn): body, HullPivot
+	# (ShipVisual: hull fitting + swappable sail mounts), collision, camera,
+	# buoyancy. Model/scale/keel tunables moved into the scene's inspector.
+	# World only injects what exists at runtime: wind, ocean, spawn position.
+	var ship: ShipController = SHIP_SCENE.instantiate()
 	ship.wind = wind
-	# Visual hull lives under a HullPivot so buoyancy can heave/tilt it WITHOUT
-	# tilting the body (which would corrupt thrust/steering — see ship_buoyancy.gd).
-	var pivot := Node3D.new()
-	pivot.name = "HullPivot"
-	ship.add_child(pivot)
-	# Visual hull: the imported ship model if present, else the greybox box.
-	# Uses the cleaned mesh (stray "Plane" group stripped); it is ~4965u long and off-origin,
-	# so we centre it on the pivot and scale to ~12 world units. All four are tunable.
-	var ship_model_path := "res://assets/ships/medieval_boat.obj"
-	var ship_model_texture := "res://assets/ships/Wood 2.JPG"  # the real wood texture (Medieval Boat.jpg is a blue render preview)
-	var ship_model_scale := 0.0024    # ~4965u long -> ~12 world units
-	var ship_model_yaw_deg := 180.0   # bow forward (model is authored facing astern)
-	var ship_model_y := -1.5          # keel height vs the hull pivot (raise/lower to sit in the water)
-	var box := BoxMesh.new()
-	box.size = Vector3(4, 3, 12)   # also the collision + buoyancy footprint below
-	var model_mesh := load(ship_model_path) as Mesh
-	var hull := MeshInstance3D.new()
-	if model_mesh:
-		# Yaw on a wrapper so rotating the bow keeps the centred model centred.
-		var yaw := Node3D.new()
-		yaw.name = "HullYaw"
-		yaw.rotation_degrees = Vector3(0.0, ship_model_yaw_deg, 0.0)
-		pivot.add_child(yaw)
-		hull.mesh = model_mesh
-		hull.scale = Vector3.ONE * ship_model_scale
-		var aabb := model_mesh.get_aabb()
-		var c := aabb.position + aabb.size * 0.5
-		# Centre X/Z on the pivot; rest the keel (min Y) at ship_model_y.
-		hull.position = Vector3(-c.x * ship_model_scale, ship_model_y - aabb.position.y * ship_model_scale, -c.z * ship_model_scale)
-		var tex := load(ship_model_texture) as Texture2D
-		if tex:
-			var mat := StandardMaterial3D.new()
-			mat.albedo_texture = tex
-			mat.roughness = 0.9   # matte wood; stops the blue sky reflecting off the hull
-			mat.metallic = 0.0
-			hull.material_override = mat
-		yaw.add_child(hull)
+	# Continue: resume where the last autosave left the ship; else default spawn.
+	var saved_pos: Variant = GameState.flags.get("ship_pos")
+	if saved_pos is Array and saved_pos.size() == 3:
+		ship.position = Vector3(saved_pos[0], saved_pos[1], saved_pos[2])
 	else:
-		hull.mesh = box
-		pivot.add_child(hull)
-		push_warning("ship model not found at %s — using greybox box" % ship_model_path)
-	# Collision stays on the body (level), not on the tilting pivot.
-	var col := CollisionShape3D.new()
-	col.shape = BoxShape3D.new()
-	(col.shape as BoxShape3D).size = Vector3(4, 3, 12)
-	ship.add_child(col)
-	# chase camera (child of the body: gets neither tilt nor bob)
-	var cam := Camera3D.new()
-	cam.position = Vector3(0, 25, 45)
-	cam.rotation_degrees = Vector3(-25, 0, 0)
-	ship.add_child(cam)
-	ship.position = Vector3(818, 1.5, -900)  # open water just off Lisbon
+		ship.position = DEFAULT_SPAWN
 	add_child(ship)
-	# Buoyancy: conform the visual hull to the FFT ocean surface.
+	var buoyancy: ShipBuoyancy = ship.get_node(^"Buoyancy")
+	# Wire scene-internal refs in code as well: exported node refs in the
+	# hand-authored .tscn proved unreliable, so nothing relies on them.
+	buoyancy.hull_pivot = ship.get_node(^"HullPivot")
+	buoyancy.ship = ship
+	buoyancy.wind = wind
 	if _ocean:
-		var buoyancy := ShipBuoyancy.new()
-		buoyancy.name = "Buoyancy"
 		buoyancy.ocean = _ocean
-		buoyancy.hull_pivot = pivot
-		buoyancy.ship = ship
-		buoyancy.wind = wind
-		buoyancy.length = box.size.z
-		buoyancy.beam = box.size.x
-		ship.add_child(buoyancy)
+	else:
+		buoyancy.enabled = false  # no ocean, nothing to conform to
 	return ship
 
 func _make_hud() -> void:

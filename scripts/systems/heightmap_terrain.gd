@@ -13,15 +13,45 @@ extends StaticBody3D
 @export var land_near_slope := 0.06    # world units per metre near sea level
 @export var land_max_height := 60.0    # peaks saturate toward this many world units
 
+## City aprons: terrain is flattened in a disc around every port so plazas and
+## buildings sit on level ground instead of a mountainside. The plateau sits just
+## below the city ground slab (y=0) so streets never clip terrain; the water
+## shader's landmask is unchanged, so no sea gets drawn over the old land.
+@export var flatten_ports := true
+@export var flatten_height := -0.3     # plateau Y (just under the city ground)
+@export var flatten_radius := 100.0    # fully flat disc (covers the 2.5x sea-view plaza)
+@export var flatten_blend := 50.0      # smooth ramp back to real terrain beyond the disc
+
 var _heights: PackedFloat32Array
+var _flatten_spots := PackedVector2Array()  # port positions, world XZ
+var _dx := 1.0
+var _dz := 1.0
+var _ox := 0.0
+var _oz := 0.0
 
 func _ready() -> void:
 	add_to_group("land")
 	if not _load_heights():
 		push_warning("HeightmapTerrain: could not load %s" % height_path)
 		return
+	_dx = world_size.x / float(grid_n - 1)
+	_dz = world_size.y / float(grid_n - 1)
+	_ox = -world_size.x * 0.5
+	_oz = -world_size.y * 0.5
+	if flatten_ports:
+		_load_flatten_spots()
 	_build_mesh()
 	_build_collision()
+
+func _load_flatten_spots() -> void:
+	var dir := DirAccess.open("res://data/ports")
+	if dir == null:
+		return
+	for file in dir.get_files():
+		if file.ends_with(".tres"):
+			var def := load("res://data/ports/" + file) as PortDef
+			if def:
+				_flatten_spots.append(Vector2(def.world_position.x, def.world_position.z))
 
 func _load_heights() -> bool:
 	var f := FileAccess.open(height_path, FileAccess.READ)
@@ -35,7 +65,18 @@ func _load_heights() -> bool:
 	return _heights.size() >= n
 
 func _h(ix: int, iz: int) -> float:
-	return _shape_height(_heights[iz * grid_n + ix])
+	var h := _shape_height(_heights[iz * grid_n + ix])
+	if _flatten_spots.is_empty():
+		return h
+	# Blend toward the plateau near ports: fully flat inside flatten_radius,
+	# smooth ramp back to the real terrain across flatten_blend.
+	var wp := Vector2(_ox + ix * _dx, _oz + iz * _dz)
+	for spot in _flatten_spots:
+		var d := wp.distance_to(spot)
+		if d < flatten_radius + flatten_blend:
+			var t := smoothstep(0.0, 1.0, clampf((d - flatten_radius) / flatten_blend, 0.0, 1.0))
+			h = lerpf(flatten_height, h, t)
+	return h
 
 func _shape_height(e: float) -> float:
 	# Saturating exponential: ~e*land_near_slope near 0, asymptotes to land_max_height.
@@ -92,7 +133,7 @@ func _build_collision() -> void:
 	shape.map_depth = n
 	var data := PackedFloat32Array(); data.resize(n * n)
 	for i in range(n * n):
-		data[i] = _shape_height(_heights[i])
+		data[i] = _h(i % n, int(i / float(n)))  # same flattening as the visual mesh
 	shape.map_data = data
 	var cs := CollisionShape3D.new()
 	# The shape is unit-spaced and centred; stretch X/Z to cover world_size (Y stays 1:1).

@@ -48,6 +48,10 @@ func confirm(id: StringName, roll_bonus: int = 0) -> bool:
 	EventBus.discovery_made.emit(id)
 	return true
 
+func reset() -> void:
+	found.clear()
+	spotted.clear()
+
 func to_dict() -> Dictionary:
 	return {"found": found}
 

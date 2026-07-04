@@ -19,6 +19,11 @@ func _ready() -> void:
 	EventBus.day_passed.connect(_on_day_passed)
 	EventBus.port_entered.connect(_on_port_entered)
 
+func reset() -> void:
+	market.clear()
+	for port_id in _port_defs:
+		_init_port(port_id)
+
 func _load_defs(dir_path: String, into: Dictionary) -> void:
 	var dir := DirAccess.open(dir_path)
 	if dir == null:

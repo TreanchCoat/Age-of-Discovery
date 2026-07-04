@@ -17,6 +17,12 @@ var minute: int:
 var _last_hour := -1
 var _last_day := -1
 
+func reset() -> void:
+	total_minutes = 8.0 * 60.0
+	paused = false
+	_last_hour = hour
+	_last_day = day
+
 func _process(delta: float) -> void:
 	if paused:
 		return

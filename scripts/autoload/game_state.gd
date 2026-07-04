@@ -26,6 +26,21 @@ func _new_game_defaults() -> void:
 		ship = ShipState.new_from_def(def)
 		fleet = [ship]
 
+## Full reset for "New Game" from the main menu. The autoloads live across
+## scene changes, so every piece of world state must be reset explicitly here.
+func new_game() -> void:
+	player_name = "Captain"
+	gold = 1000
+	stats = CharacterStats.new()
+	current_port = &""
+	flags = {}
+	fleet.clear()
+	ship = null
+	_new_game_defaults()
+	WorldClock.reset()
+	DiscoveryDB.reset()
+	EconomySim.reset()
+
 func save_game() -> void:
 	var data := {
 		"player_name": player_name,

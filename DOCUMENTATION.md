@@ -32,7 +32,7 @@ Systems auto-load entire folders of `.tres` files at startup (`data/goods/`, `da
 
 ## 2. Autoloads (global singletons)
 
-Registered in `project.godot`, alive for the whole game, in load order:
+Registered in `project.godot`, alive for the whole game (they survive scene changes — which is why `GameState.new_game()` must reset them explicitly), in load order:
 
 ### EventBus — `scripts/autoload/event_bus.gd`
 Pure signal declarations, no logic. Current signals: `hour_passed`, `day_passed`, `port_entered/left`, `undock_requested`, `weather_changed`, `discovery_spotted/made`, `trade_executed`, `prices_updated`, `supplies_short`, `voyage_event_fired/resolved`, `fame_changed`, `gold_changed`.
@@ -41,7 +41,10 @@ Pure signal declarations, no logic. Current signals: `hour_passed`, `day_passed`
 Converts real seconds to game minutes (`MINUTES_PER_REAL_SECOND`, default 2.0 → one game day per 12 real minutes). Emits `hour_passed`/`day_passed` through EventBus; all simulation hangs off these ticks. `total_minutes` is the single source of truth — events that "cost time" (e.g. riding out a storm) just add to it.
 
 ### GameState — `scripts/autoload/game_state.gd`
-Owns the player: `gold` (setter clamps and emits `gold_changed`), `stats` (CharacterStats), `ship` (active ShipState), `fleet` (all owned ships), `current_port` (empty StringName = at sea), `flags` (misc dictionary — also stores the map fog bitmap). `save_game()`/`load_game()` serialize everything, including the other autoloads, to `user://save.json`.
+Owns the player: `gold` (setter clamps and emits `gold_changed`), `stats` (CharacterStats), `ship` (active ShipState), `fleet` (all owned ships), `current_port` (empty StringName = at sea), `flags` (misc dictionary — also stores the fog-of-war bitmap and last ship position). `save_game()`/`load_game()` serialize everything, including the other autoloads, to `user://save.json`. `new_game()` does the full reset for the main menu's New Game (own fields + `WorldClock.reset()` + `DiscoveryDB.reset()` + `EconomySim.reset()`). See §9 for the full save-system contract.
+
+### Settings — `scripts/autoload/settings.gd`
+User preferences, persisted separately from saves in `user://settings.cfg` (ConfigFile). Currently `master_volume` (0–1, applied to the Master audio bus on boot and on change). Menus write it via the property setter and call `save_settings()` when a slider drag ends. Add future settings (fullscreen, keybinds) here.
 
 ### EconomySim — `scripts/autoload/economy_sim.gd`
 Each port's market: `market[port_id][good_id] = {supply, baseline, fluct}`. **Every port trades every good**, so you can always buy or offload anything you carry.
@@ -92,11 +95,33 @@ ShipController then multiplies the result by `wind.strength` (0.2–2.0) and `pa
 ### WindSystem — `systems/wind_system.gd`
 One global wind: a unit Vector2 on the XZ plane plus `strength` (0.2 calm – 2.0 storm). Every 3 game hours the target heading drifts ±60° and strength shifts ±0.3; actual direction rotates smoothly. `alignment(forward)` returns tail/headwind dot product for ShipController. Strong wind is also a precondition for storm events.
 
+### The ship scene — `scenes/ship/ship.tscn`
+The player ship is a proper scene:
+
+```
+Ship (CharacterBody3D + ship_controller.gd)
+├── HullPivot (Node3D + ship_visual.gd)   ← buoyancy heaves/tilts THIS, never the body
+│   └── HullYaw (180° — placeholder model faces astern)
+│       ├── Hull (MeshInstance3D — placeholder medieval_boat.obj + wood material)
+│       ├── MainSailMount (Node3D, empty)
+│       └── ForeSailMount (Node3D, empty)
+├── Collision (level box 4×3×12 — stays on the body)
+├── Camera (chase cam — inherits neither tilt nor bob)
+└── Buoyancy (ship_buoyancy.gd; ocean/wind/hull_pivot refs injected by world.gd)
+```
+
+**ShipVisual** (`ship/ship_visual.gd`, on HullPivot) self-wires and fits the hull model at runtime (scale, AABB centring, keel height — inspector exports), falls back to a greybox box if the mesh is missing, and owns the **swappable-sail API** for the future shipyard: `set_sail(&"main", scene)` / `clear_sail()` / `get_sail()` against named mount nodes. The placeholder hull has sails baked in, so mounts are empty markers for now; when real sail-less hulls arrive, reposition mounts to the masts and instance sail scenes there.
+
+**ShipBuoyancy** (`ship/ship_buoyancy.gd`) samples `ocean.get_height()` at bow/stern/port/starboard probes and applies heave/pitch/roll to HullPivot only — the physics body, collision, and camera stay level so thrust and steering are never corrupted.
+
 ### ShipController — `ship/ship_controller.gd` (CharacterBody3D)
 Player ship. Steering is via a **helm/wheel**: A/D swing a `wheel` value toward a side (`WHEEL_TURN_RATE`), releasing lets it spring back to center (`WHEEL_RETURN_RATE`); the ship rotates at a rate set by wheel position × `turn_rate` × a speed factor × `pace`. Turn authority scales with speed but never below `MIN_STEERAGE` (0.3), so you can't get stuck in irons. **Two sails**, toggled F (horizontal/square) and G (vertical/fore-and-aft); each eases toward its commanded state (`SAIL_CHANGE_RATE`) so furling lets thrust decay rather than cut out. **Pace** (0.5→1.0) builds +5%/s while making way and steering straight, bleeds while turning, and falls back to 50% when stopped or both sails are down; it scales both speed and turn rate. Target speed = `effective_speed(...) × wind.strength × pace`, approached with inertia (`move_toward`); `velocity.y` is zeroed each frame so the flat sea is never left. Mouse wheel zooms the chase camera (`ZOOM_MIN`–`ZOOM_MAX`). On `port_entered` the ship docks (`set_at_sea(false)`: hull hidden, frozen, sails furled); on `undock_requested` it respawns just outside the harbor. `use_fallback_observe` — when SpyglassUI is present, the plain E-to-confirm fallback is disabled.
 
 ### DiscoveryArea / PortArea — `systems/discovery_area.gd`, `port_area.gd` (Area3D)
-Proximity triggers built from their Def's position/radius at runtime. DiscoveryArea → `DiscoveryDB.spot()`. PortArea → sets `GameState.current_port`, emits `port_entered`/`port_left` (which opens/closes the market UI).
+Proximity triggers built from their Def's position/radius at runtime. DiscoveryArea → `DiscoveryDB.spot()`. PortArea: sailing into range shows **"Press E to dock"** — docking is a choice, not automatic (matters once combat/pursuit exists). E → sets `GameState.current_port`, emits `port_entered` (market UI opens, autosave fires); leaving range after undock emits `port_left`. Ports are instanced from **`scenes/port/port.tscn`** (PortArea + greybox marker + billboard `Label3D` that PortArea fills with the port's display name); one instance per `data/ports/*.tres`.
+
+### HeightmapTerrain — `systems/heightmap_terrain.gd` (StaticBody3D)
+Real terrain from a GEBCO bathymetry/topography crop (Iberia/Madeira): a 513² float32 height grid (`assets/terrain/region_height.bin`, metres, sea level = 0) built into an ArrayMesh + `HeightMapShape3D` collision, in the `land` group so the ship grounds on it. Land height uses a saturating curve (`land_near_slope`, `land_max_height` exports): ~linear near the coast, compressing toward a ceiling for peaks. Colored by `assets/terrain/terrain.gdshader` (height/slope bands: sand/grass/rock/snow — flat colors, no textures yet). The landmask (`region_landmask.png`) is passed to the water shader so waves aren't drawn over land. **Planned evolution** (post-demo, see `PROJECT_PLAN.md` §4): shader polish + waterline integration first, then migration to the Terrain3D plugin for LOD, splatting, higher coastline resolution, and in-editor sculpt/paint.
 
 ### SupplySystem — `systems/supply_system.gd`
 Voyage pressure. Each `day_passed` *at sea*, every fleet ship consumes water (0.5/crew) and food (0.3/crew). Shortage: morale −0.25/day, and at zero morale crew starts dying (10%/day, floor 1). Well-supplied crews recover morale +0.1/day. Static helpers `resupply_cost()`/`resupply()` refill to caps (water crew×10, food crew×8) at 2g per missing unit — used by the market UI's Resupply button. Docked ships consume nothing (simplification, revisit later).
@@ -136,8 +161,8 @@ Opens **centered** on `port_entered` with a green "Voyage Successful — Welcome
 ### WorldMapUI — `world_map_ui.gd`
 Toggled with M. Square map (600px) mapping world XZ (±`world_extent`, default 2000) to map UV.
 
-- **Background:** empty parchment ColorRect for now. When real map art exists, set `map_texture` — everything else already works.
-- **Fog of war:** a 512² RGBA image, opaque dark; each game hour a soft-edged circle is punched transparent around the ship. Persisted as PNG bytes in `GameState.flags["fog_png"]`, so it saves/loads automatically.
+- **Background:** the terrain preview (`assets/terrain/region_preview.png`), assigned by `world.gd`; swap in stylized map art via `map_texture` whenever it exists.
+- **Fog of war:** a 512² RGBA image, opaque dark; each game hour a soft-edged circle is punched transparent around the ship. Persisted in `GameState.flags["fog_png"]` as a **base64 string** (the save is JSON, which can't hold raw `PackedByteArray` — see §9), decoded tolerantly on load.
 - **Markers:** ports always shown (captains know charts; fog still covers unvisited regions), found discoveries in gold, ship as red triangle with heading.
 
 ### SpyglassUI — `spyglass_ui.gd`
@@ -161,20 +186,42 @@ Fixed N/E/S/W rose with a red needle pointing along the bow. Sits just left of t
 ### HelmIndicator — `helm_indicator.gd`
 Bottom-center wheel: a circle with a rotating cross showing the helm (`ship.wheel`) position, with a fixed notch at top for reference.
 
+### MainMenu — `main_menu.gd` + `scenes/menu/main_menu.tscn`
+The project's **main scene**. New Game (`GameState.new_game()` → world), Continue (disabled when no save; `GameState.load_game()` → world), Settings (master volume slider → `Settings`), Quit. UI built from code like the rest.
+
+### PauseMenu — `pause_menu.gd`
+Esc (`ui_cancel`) pauses the tree and shows Resume / Settings (volume slider) / **Save & Main Menu** (calls `world.autosave()` first). Runs `PROCESS_MODE_ALWAYS`; it deliberately ignores Esc while another modal (voyage event, spyglass) has the tree paused, so it never steals their pause.
+
 ---
 
-## 7. World bootstrap — `scenes/world/world.gd`
+## 6b. Cities — `scripts/city/`, `scenes/city/`
 
-`world.tscn` is a single Node3D with this script; everything is generated in `_ready()` so the game runs with zero art:
+**One scene per city, two modes** (the agreed Layer-3 architecture, greyboxed):
 
-1. Environment (sun + procedural sky), and the **FFT ocean** — `_make_sea()` instances `assets/water/ocean.tscn` (realistic GodotOceanWaves port), `_process()` keeps it centred on the ship and drives its cascade wind from WindSystem. The old code-built sea plane is retired. **See `OCEAN_INTEGRATION.md`** for the full ocean architecture, the 4.7 port fixes, and the buoyancy plan.
-2. WindSystem, SupplySystem.
-3. PortArea + greybox box marker per `data/ports/*.tres`; DiscoveryArea per DiscoveryDB def.
-4. Player ship (greybox box hull + chase camera) just off Lisbon; refs kept in `_ship`/`_wind`.
-5. PortMarketUI, WorldMapUI (registered to ship), VoyageEventSystem + its UI, SpyglassUI (disables the ship's fallback observe).
-6. HUD: status + sail readout, MinimapUI, CompassUI, HelmIndicator.
+- **CityScene** (`city.gd`, root of `city_lisbon.tscn` / `city_funchal.tscn`): sea-view mode by default — the `Buildings/` children form the skyline visible from the water (world.gd instances each city at its port automatically if `scenes/city/city_<port_id>.tscn` exists). `enter_street_mode()` enables the `StreetLevel/` node (ground, future props/NPCs; colliders and CSG collision are force-disabled at sea) and spawns the player. Running a city scene directly (**F6**) auto-enters street mode with a test sun/sky — that's the dev loop for building out cities. The docking flow doesn't call `enter_street_mode()` yet (future work).
+- **CityBuilding** (`city_building.gd`, StaticBody3D): greybox building typed via `building_type` export (market, shipyard, tavern, bank, governor, church, warehouse, house) — builds its own sized/colored box, sign label, collision, and door slab (+Z face; rotate the node to face the street). `interact()` emits `EventBus.city_building_interacted(city_id, type)` — **future facility UIs subscribe to their type there** — and returns toast text ("Bank — not yet open") until they exist.
+- **CityPlayer** (`city_player.gd`, CharacterBody3D): the walking captain, a cube for now. WASD (`walk_*` actions, camera-relative), gravity; E (`observe`) interacts with the nearest building door within 4u. Camera matches the ship's scheme exactly: wheel zoom, hold-RMB orbit (cursor captured), middle-click reset.
+- **Entering/leaving on foot:** the market UI's **"Enter the city"** button (shown only where a city scene exists) emits `city_enter_requested` → world calls `enter_street_mode()`; the **"Return to ship"** button in the city calls `exit_street_mode()` → `city_left` → world restores the ship camera and the market panel reopens (still docked).
+- **Sea-view scale:** `CityScene.sea_view_scale` (default 2.5) scales the `Buildings` node up in sea view so the skyline holds its own next to the ship, and back to 1.0 (human scale) in street mode.
 
-Replace any piece with a real scene incrementally — e.g. give ShipDef.scene a real model and swap `_spawn_ship` to instance it.
+---
+
+## 7. Scene flow & world bootstrap
+
+**Flow:** `main_menu.tscn` (main scene) → `world.tscn` (gameplay) → back via pause menu. The autoloads persist across these changes; scene scripts only build visuals/UI around them.
+
+`world.tscn` is a single Node3D with `world.gd`; `_ready()` builds:
+
+1. Environment (sun + procedural sky), the **FFT ocean** (`_make_sea()` instances `assets/water/ocean.tscn`; `_process()` keeps it centred on the ship and drives cascade wind from WindSystem) + the far-ocean ring to ~2048. **See `OCEAN_INTEGRATION.md`.**
+2. `HeightmapTerrain` (GEBCO land, collision, landmask → water shader).
+3. WindSystem, SupplySystem.
+4. One `port.tscn` instance per `data/ports/*.tres`; DiscoveryArea per DiscoveryDB def.
+5. The ship — instances **`ship.tscn`**, injects wind/ocean into it and its Buoyancy node (node refs wired in code, not scene exports), spawns at the last autosaved position (`flags["ship_pos"]`) or the default off Lisbon.
+6. PortMarketUI, WorldMapUI (registered to ship), VoyageEventSystem + UI, SpyglassUI (disables the ship's fallback observe), DebugUI, PauseMenu (given `world` for autosave).
+7. Ocean ambience audio (`_make_audio()`, loops, keeps playing while paused).
+8. HUD: status + sail readout, MinimapUI, CompassUI, HelmIndicator. *(Still code-built — next candidate for scene migration.)*
+
+`world.autosave()` snapshots the ship position into `flags["ship_pos"]` and calls `GameState.save_game()`; it runs on every `port_entered` and from the pause menu.
 
 ---
 
@@ -186,14 +233,26 @@ Replace any piece with a real scene incrementally — e.g. give ShipDef.scene a 
 - **Adding a signal?** Declare in EventBus only; emit from the owning system.
 - **Adding a system?** Node in the world scene if it needs the scene/ticks via EventBus; autoload only if it must survive scene changes or be globally addressable.
 - **Pause behavior:** modal UIs (events, spyglass) set `get_tree().paused = true` and run with `PROCESS_MODE_ALWAYS`. WorldClock pauses with the tree, so paused time costs nothing.
-- **Input actions** are predefined in `project.godot` (no manual setup): `turn_left` (A), `turn_right` (D), `toggle_horizontal_sail` (F), `toggle_vertical_sail` (G), `observe` (E), `toggle_map` (M). Camera zoom is mouse-wheel, handled directly in ShipController (not an action).
-- **Save data** lives at `user://save.json` (on Windows: `%APPDATA%/Godot/app_userdata/Age of Discovery/`).
+- **Input actions** are predefined in `project.godot` (no manual setup): `turn_left` (A), `turn_right` (D), `toggle_horizontal_sail` (F), `toggle_vertical_sail` (G), `observe` (E), `toggle_map` (M). Pause is the built-in `ui_cancel` (Esc). Camera zoom is mouse-wheel, handled directly in ShipController (not an action).
+- **Hand-authored `.tscn` files:** open in the editor and save once to canonicalize. Don't rely on exported node references in hand-written scenes — wire node refs in code (see `ship_visual.gd`, `world.gd`).
 - **Shader globals:** the FFT ocean's shaders use `global uniform`s registered in `project.godot` `[shader_globals]` (`water_color`, `foam_color`, `num_cascades`, `displacements`, `normals`). If the water shader fails to compile saying a global "does not exist", they're missing.
 - **Ocean mesh LODs:** `assets/water/clipmap_*.obj.import` must keep `generate_lods=false`. If a reimport flips it on, the waves flatten into smooth swells (4.7 decimates the clipmap). See `OCEAN_INTEGRATION.md`.
 - **Renderer:** Forward+ / Vulkan. The ocean's compute works on it; `d3d12` is a fallback only.
 
-## 9. Where to go next
+## 9. The save system
 
-**Immediate next: ship buoyancy** — make the ship bob/tilt on the FFT ocean. The ocean is GPU-computed, so this needs the CPU displacement readback re-enabled on the render thread (`RenderingServer.call_on_render_thread`), then `water.gd.get_height(ship_pos)` drives the ship's Y + tilt as a kinematic bob (sailing model untouched). Full plan in `OCEAN_INTEGRATION.md`.
+**One slot, one JSON file:** `user://save.json` (Windows: `%APPDATA%\Godot\app_userdata\Age of Discovery\`). Human-readable — hand-edit gold for testing, or send it to a teammate to reproduce a bug. Settings are separate (`user://settings.cfg`) and are *not* part of the save.
 
-After that, in rough order (see `PROJECT_PLAN.md`): migrate greybox pieces into real `.tscn` scenes (start with the ship — `Ship.tscn`) and a real ship model; tavern/quest hooks pointing at discoveries; more content (ports/goods/events are pure data); fame consumption (titles/privileges); fleet/crew depth; factions; then naval combat as an instanced scene; then co-op replication of the State layer. Presentation: the demo's HDRI sky for the ocean, audio, a designed UI theme.
+**When it saves:** automatically on every docking (`port_entered` → `world.autosave()`) and on the pause menu's "Save & Main Menu". Deliberately no save-anywhere-at-sea: reaching port banks your progress, which keeps voyages tense.
+
+**What it saves:** player (name, gold, skills, fame) · fleet (per ship: durability, crew, supplies, morale, cargo) · current port · `flags` (misc world state, incl. fog-of-war as base64 PNG and the ship's position as `[x,y,z]`) · clock · found discoveries · every port's market state.
+
+**The contract:** everything goes through `to_dict()`/`from_dict()` pairs, and everything inside them must be **JSON-representable** — numbers, strings, bools, arrays, string-keyed dicts. Raw bytes must be base64 (`Marshalls.raw_to_base64`); Vector3s must be number arrays. A raw `PackedByteArray` survives in memory but comes back from JSON as a String and crashes typed assignments (this happened with the fog bitmap — hence the base64 rule). Corollary: **new stateful features must add their fields to a `to_dict()`/`from_dict()` pair or they silently reset on load.** `new_game()` must also reset them.
+
+The same `to_dict()` data is the future co-op sync format, so keeping it clean pays twice.
+
+## 10. Where to go next
+
+**Immediate next: M5** — guided objective tracked on the HUD + voyage summary screen, then a Windows export (see `PROJECT_PLAN.md` §3). M3 leftovers in parallel: migrate the HUD to `hud.tscn`, more goods + a 3rd port when ready, spyglass tuning.
+
+**Post-demo:** the land & cities visual roadmap (`PROJECT_PLAN.md` §4 — terrain shader polish → Terrain3D migration → city scenes with sea-visible LOD), then the parking lot: quests/taverns, fame consumption, shipyard (the sail-mount API in `ship_visual.gd` is waiting for it), fleet/crew depth, factions, naval combat, co-op replication of the State layer.

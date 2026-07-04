@@ -25,6 +25,16 @@ signal supplies_short(ship: ShipState)
 signal voyage_event_fired(def: VoyageEventDef)
 signal voyage_event_resolved(def: VoyageEventDef)
 
+# City / on foot
+## Future facility UIs (shipyard, bank, tavern...) listen for their type here.
+signal city_building_interacted(city_id: StringName, building_type: String)
+signal city_enter_requested(city_id: StringName)   # market UI "Enter the city"
+signal city_left(city_id: StringName)              # player returned to the ship
+
+# Objective (demo guided goal)
+signal objective_updated()
+signal objective_completed()
+
 # Player
 signal fame_changed(category: StringName, new_value: int)
 signal gold_changed(new_value: int)

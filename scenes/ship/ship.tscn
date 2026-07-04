@@ -1,0 +1,40 @@
+[gd_scene format=3 uid="uid://b6flne8ubeeu5"]
+
+[ext_resource type="Script" uid="uid://cnu8j12g6rrj1" path="res://scripts/ship/ship_controller.gd" id="1"]
+[ext_resource type="Script" uid="uid://bembemf2vwpuy" path="res://scripts/ship/ship_visual.gd" id="2"]
+[ext_resource type="Script" uid="uid://cwt0p0vgwt1un" path="res://scripts/ship/ship_buoyancy.gd" id="3"]
+[ext_resource type="Texture2D" uid="uid://jolakqhsl84m" path="res://assets/ships/Wood 2.JPG" id="4"]
+
+[sub_resource type="StandardMaterial3D" id="mat_wood"]
+albedo_texture = ExtResource("4")
+roughness = 0.9
+
+[sub_resource type="BoxShape3D" id="hull_shape"]
+size = Vector3(4, 3, 12)
+
+[node name="Ship" type="CharacterBody3D" unique_id=606759909]
+script = ExtResource("1")
+
+[node name="HullPivot" type="Node3D" parent="." unique_id=1501967074]
+script = ExtResource("2")
+
+[node name="HullYaw" type="Node3D" parent="HullPivot" unique_id=46729199]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 0)
+
+[node name="Hull" type="MeshInstance3D" parent="HullPivot/HullYaw" unique_id=2078962032]
+material_override = SubResource("mat_wood")
+
+[node name="MainSailMount" type="Node3D" parent="HullPivot/HullYaw" unique_id=2058869219]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0.6)
+
+[node name="ForeSailMount" type="Node3D" parent="HullPivot/HullYaw" unique_id=2019016336]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8, -3.2)
+
+[node name="Collision" type="CollisionShape3D" parent="." unique_id=760539052]
+shape = SubResource("hull_shape")
+
+[node name="Camera" type="Camera3D" parent="." unique_id=1947870689]
+transform = Transform3D(1, 0, 0, 0, 0.906308, 0.422618, 0, -0.422618, 0.906308, 0, 25, 45)
+
+[node name="Buoyancy" type="Node" parent="." unique_id=1610232902]
+script = ExtResource("3")

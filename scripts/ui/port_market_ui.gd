@@ -8,6 +8,7 @@ var _panel: PanelContainer
 var _banner: Label
 var _title: Label
 var _rows: VBoxContainer
+var _enter_city_btn: Button
 var _port_id: StringName = &""
 var _good_defs := {}  # good_id -> GoodDef
 
@@ -53,19 +54,38 @@ func _build_ui() -> void:
 	_rows = VBoxContainer.new()
 	vbox.add_child(_rows)
 
+	_enter_city_btn = Button.new()
+	_enter_city_btn.text = "Enter the city"
+	_enter_city_btn.pressed.connect(_on_enter_city)
+	vbox.add_child(_enter_city_btn)
+
 	var close := Button.new()
 	close.text = "Weigh anchor — set sail"
 	close.pressed.connect(_on_set_sail)
 	vbox.add_child(close)
 
+	EventBus.city_left.connect(_on_city_left)
+
 func _on_set_sail() -> void:
 	hide_panel()
 	EventBus.undock_requested.emit()
+
+func _on_enter_city() -> void:
+	_panel.hide()  # keep docked state; just step ashore
+	EventBus.city_enter_requested.emit(_port_id)
+
+func _on_city_left(city_id: StringName) -> void:
+	# Back from the streets: reopen the port screen if we're still docked here.
+	if city_id == _port_id and GameState.current_port == _port_id:
+		_refresh()
+		_panel.show()
 
 func _on_port_entered(port_id: StringName) -> void:
 	_port_id = port_id
 	var port_name := String(port_id).capitalize()
 	_banner.text = "Voyage Successful!  —  Welcome to %s" % port_name
+	# Only offer the city button where a city scene exists.
+	_enter_city_btn.visible = ResourceLoader.exists("res://scenes/city/city_%s.tscn" % String(port_id))
 	_refresh()
 	_panel.show()
 	get_tree().paused = false

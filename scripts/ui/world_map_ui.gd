@@ -46,12 +46,34 @@ func _unhandled_input(event: InputEvent) -> void:
 ## --- Fog -----------------------------------------------------------------
 
 func _init_fog() -> void:
-	var saved: PackedByteArray = GameState.flags.get("fog_png", PackedByteArray())
+	# Fog is persisted in GameState.flags as a BASE64 STRING (JSON-safe: the save
+	# file is JSON, which can't hold raw PackedByteArray — it round-trips as a
+	# String and would crash a typed assignment). Decode tolerantly: older saves
+	# may still hold a raw PackedByteArray from before this fix.
+	var saved := PackedByteArray()
+	var stored: Variant = GameState.flags.get("fog_png")
+	if stored is String and _looks_like_base64(stored):
+		saved = Marshalls.base64_to_raw(stored)
+	elif stored is PackedByteArray:
+		saved = stored
 	_fog_image = Image.new()
 	if saved.is_empty() or _fog_image.load_png_from_buffer(saved) != OK:
 		_fog_image = Image.create(fog_resolution, fog_resolution, false, Image.FORMAT_RGBA8)
 		_fog_image.fill(Color(0.05, 0.05, 0.08, 0.95))
 	_fog_texture = ImageTexture.create_from_image(_fog_image)
+
+## Pre-validate so Marshalls.base64_to_raw never logs an engine error on
+## garbage from a pre-base64-era save (it complains loudly on invalid input).
+func _looks_like_base64(s: String) -> bool:
+	if s.is_empty() or s.length() % 4 != 0:
+		return false
+	for i in s.length():
+		var c := s.unicode_at(i)
+		var ok := (c >= 65 and c <= 90) or (c >= 97 and c <= 122) \
+			or (c >= 48 and c <= 57) or c == 43 or c == 47 or c == 61  # A-Z a-z 0-9 + / =
+		if not ok:
+			return false
+	return true
 
 func _reveal_at_ship() -> void:
 	if _ship == null:
@@ -72,7 +94,7 @@ func _reveal_at_ship() -> void:
 			current.a = minf(current.a, target_a)
 			_fog_image.set_pixelv(p, current)
 	_fog_texture.update(_fog_image)
-	GameState.flags["fog_png"] = _fog_image.save_png_to_buffer()
+	GameState.flags["fog_png"] = Marshalls.raw_to_base64(_fog_image.save_png_to_buffer())
 
 func _world_to_fog_px(world_pos: Vector3) -> Vector2i:
 	var u := (world_pos.x / world_extent + 1.0) * 0.5

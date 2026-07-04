@@ -1,0 +1,77 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/city/city.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/city/city_building.gd" id="2"]
+
+[sub_resource type="StandardMaterial3D" id="mat_ground"]
+albedo_color = Color(0.62, 0.58, 0.5, 1)
+roughness = 1.0
+
+[node name="CityLisbon" type="Node3D"]
+script = ExtResource("1")
+city_id = &"lisbon"
+display_name = "Lisbon"
+
+[node name="Buildings" type="Node3D" parent="."]
+
+[node name="Market" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -20, 0, 0)
+script = ExtResource("2")
+building_type = "market"
+
+[node name="Shipyard" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -25)
+script = ExtResource("2")
+building_type = "shipyard"
+
+[node name="Warehouse" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 18, 0, -25)
+script = ExtResource("2")
+building_type = "warehouse"
+
+[node name="Tavern" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 20, 0, 0)
+script = ExtResource("2")
+building_type = "tavern"
+sign_text = "The Salty Anchor"
+
+[node name="Bank" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -12, 0, 20)
+script = ExtResource("2")
+building_type = "bank"
+
+[node name="Governor" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 12, 0, 22)
+script = ExtResource("2")
+building_type = "governor"
+sign_text = "Governor's Mansion"
+
+[node name="Church" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -26, 0, -18)
+script = ExtResource("2")
+building_type = "church"
+
+[node name="House1" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 27, 0, 14)
+script = ExtResource("2")
+building_type = "house"
+
+[node name="House2" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 28, 0, -12)
+script = ExtResource("2")
+building_type = "house"
+
+[node name="House3" type="StaticBody3D" parent="Buildings"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -28, 0, 10)
+script = ExtResource("2")
+building_type = "house"
+
+[node name="StreetLevel" type="Node3D" parent="."]
+
+[node name="Ground" type="CSGBox3D" parent="StreetLevel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0)
+size = Vector3(90, 2, 90)
+material = SubResource("mat_ground")
+
+[node name="PlayerSpawn" type="Marker3D" parent="StreetLevel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 8)
