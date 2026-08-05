@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="CannonDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/cannon_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"culverin"
+display_name = "Light Culverin"
+category = "equipment"
+description = "A modest gun for a modest ship. Barks more than it bites, but four of them bark loudly."
+base_price = 350
+slot = &"cannon"
+damage = 8
+fire_range = 90.0
+reload_time = 6.0
+ball_speed = 60.0
+scatter_deg = 4.0
+weight_each = 2.0

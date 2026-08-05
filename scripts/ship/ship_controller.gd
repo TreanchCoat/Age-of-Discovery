@@ -1,14 +1,27 @@
 class_name ShipController
 extends CharacterBody3D
-## Player ship at sea. Age-of-sail feel: you steer; speed comes from sails + wind.
+## A sailing hull — player OR AI. Age-of-sail feel: steering + sails + wind.
 ## Two sails, each toggled fully up/down independently and added together:
 ##   horizontal sail (square) — thrives with the wind astern; fades to nothing upwind
 ##   vertical sail (fore-and-aft) — thrives on the beam, keeps some thrust astern
 ## Both sails down -> no power -> the ship coasts to a stop.
-## Input actions (set in project.godot):
-##   turn_left (A), turn_right (D), toggle_horizontal_sail (F), toggle_vertical_sail (G), observe (E)
+##
+## THE DRIVING CONTRACT (combat step 1 refactor): every frame the physics reads
+## three command channels — `turn_input` (-1..1) plus the two sail targets.
+##   - Player (is_player=true): turn_input comes from the input actions each
+##     tick; F/G toggles flip the sail targets; camera/docking/observe active.
+##   - AI (is_player=false, e.g. NPCShip): a _think() sets the same fields,
+##     so AI ships obey identical wind physics, pace, and steerageway rules.
+## Which ShipState this hull sails with is `ship_state` (player: GameState.ship,
+## injected by world.gd; NPCs own theirs). Never read GameState.ship directly here.
 
-@export var wind: WindSystem  # assign in editor (node in World scene)
+@export var wind: WindSystem       # assign in editor (node in World scene)
+@export var is_player := true      # false = no input/camera/docking/observe
+
+var ship_state: ShipState          # stats/damage source; defaults to GameState.ship for the player
+var turn_input := 0.0              # -1 starboard .. +1 port; the ONE steering channel
+var broadside: Broadside           # gun batteries (created in _ready if armed)
+var sunk := false
 
 const SPEED_SCALE := 1.0  # knots -> world units/sec; tune to world scale
 const WHEEL_TURN_RATE := 0.75   # how fast the helm swings to the held side (per sec)
@@ -58,10 +71,19 @@ func exit_shallows() -> void:
 	_shallow_zones = maxi(_shallow_zones - 1, 0)
 
 func _ready() -> void:
+	if ship_state == null and is_player:
+		ship_state = GameState.ship
 	# Docking takes the ship off the water (hull hidden, controls frozen) while you
-	# trade; "set sail" puts it back just outside the harbor and hands you the helm.
-	EventBus.port_entered.connect(_on_dock)
-	EventBus.undock_requested.connect(_on_undock)
+	# trade; "set sail" puts it back just outside the harbor. Player-only: NPC
+	# ships neither dock nor answer the market's undock.
+	if is_player:
+		EventBus.port_entered.connect(_on_dock)
+		EventBus.undock_requested.connect(_on_undock)
+	# Gun batteries — any hull whose state carries cannons gets a Broadside.
+	broadside = Broadside.new()
+	broadside.name = "Broadside"
+	broadside.ship = self
+	add_child(broadside)
 	for child in get_children():
 		if child is Camera3D:
 			_camera = child
@@ -128,7 +150,7 @@ func _set_meshes_visible(node: Node, v: bool) -> void:
 		_set_meshes_visible(child, v)
 
 func _physics_process(delta: float) -> void:
-	var state := GameState.ship
+	var state := ship_state
 	if state == null:
 		return
 
@@ -137,8 +159,12 @@ func _physics_process(delta: float) -> void:
 	horizontal_sail = move_toward(horizontal_sail, horizontal_sail_target, SAIL_CHANGE_RATE * delta)
 	vertical_sail = move_toward(vertical_sail, vertical_sail_target, SAIL_CHANGE_RATE * delta)
 
-	# Helm: A/D swing the wheel toward that side; let go and it springs back to center.
-	var helm_input := Input.get_axis("turn_right", "turn_left")
+	# Helm: the turn_input channel swings the wheel toward that side; released,
+	# it springs back to center. Player fills the channel from the keys; AI
+	# subclasses set it in _think() before super's physics runs.
+	if is_player:
+		turn_input = Input.get_axis("turn_right", "turn_left")
+	var helm_input := turn_input
 	var turning := absf(helm_input) > 0.01
 	if turning:
 		wheel = clampf(wheel + helm_input * WHEEL_TURN_RATE * delta, -1.0, 1.0)
@@ -197,7 +223,39 @@ func _physics_process(delta: float) -> void:
 		_scrape_accum -= float(whole)
 		state.take_damage(whole)
 
+## Take cannon fire (or any external damage). Handles sinking:
+## NPC hulls go down for real; the player is spared at 1 hull for now
+## (death/consequence design is still open — see PROJECT_PLAN §5).
+func receive_hit(damage: int, attacker: Node3D) -> void:
+	if sunk or ship_state == null:
+		return
+	ship_state.take_damage(damage)
+	CombatFX.impact(self, global_position + Vector3.UP * 2.5)
+	EventBus.ship_hit.emit(attacker, self, damage)
+	if ship_state.durability <= 0:
+		if is_player:
+			ship_state.durability = 1  # spared — for now
+		else:
+			_sink()
+
+func _sink() -> void:
+	if sunk:
+		return
+	sunk = true
+	EventBus.ship_sunk.emit(self)
+	set_physics_process(false)
+	# Slip beneath the waves, then clean up.
+	var tw := create_tween()
+	tw.tween_property(self, "global_position:y", global_position.y - 8.0, 6.0)
+	tw.tween_callback(queue_free)
+
 func _unhandled_input(event: InputEvent) -> void:
+	if not is_player:
+		return
+	if event.is_action_pressed("fire_port"):
+		broadside.fire_side(Broadside.Side.PORT)
+	if event.is_action_pressed("fire_starboard"):
+		broadside.fire_side(Broadside.Side.STARBOARD)
 	if event.is_action_pressed("toggle_horizontal_sail"):
 		horizontal_sail_target = 0.0 if horizontal_sail_target > 0.5 else 1.0
 	if event.is_action_pressed("toggle_vertical_sail"):

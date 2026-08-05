@@ -34,6 +34,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build_ui()
 	EventBus.discovery_spotted.connect(_on_spotted)
+	EventBus.discovery_lost.connect(_on_lost)
 	EventBus.discovery_made.connect(func(_id): _close())
 
 func _build_ui() -> void:
@@ -78,6 +79,12 @@ func _build_ui() -> void:
 func _on_spotted(id: StringName) -> void:
 	_active_id = id
 	_banner.show()
+
+func _on_lost(id: StringName) -> void:
+	# Out of range: drop the banner (unless mid-minigame — let that resolve).
+	if id == _active_id and not _overlay.visible:
+		_active_id = &""
+		_banner.hide()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not event.is_action_pressed("observe") or _active_id == &"":

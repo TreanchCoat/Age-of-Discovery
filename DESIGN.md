@@ -14,7 +14,7 @@ Fix (common UWO complaints):
 - No timer-gated travel padding: sailing is engaging (wind, currents, hazards, events), and fast travel unlocks on routes you've mastered.
 - Offline economy that reacts to *you* (and co-op partners), not thousands of bots.
 - Clear information: in-game encyclopedia, no wiki-required design.
-- Meaningful discoveries: each one has a story hook, a reward, and a world effect — not just an XP packet.
+- Meaningful discoveries: each one has a story hook, a reward, and a world effect — not just an XP packet. Mix of random finds, quest-tied finds, and discoveries that *start* quests; the setting is historical but seasoned with myth (uncharted anomalies, legends made real — Bermuda-esque, norse echoes) revealed through rumors and quests, never just map markers.
 
 ## Pillars
 

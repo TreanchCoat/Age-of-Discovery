@@ -26,9 +26,11 @@ func is_found(id: StringName) -> bool:
 	return found.has(id)
 
 func spot(id: StringName) -> void:
-	if is_found(id) or spotted.has(id):
+	if is_found(id):
 		return
 	spotted[id] = true
+	# Always re-emit (not just first time) so the banner returns when the ship
+	# re-enters an area it previously sailed away from.
 	EventBus.discovery_spotted.emit(id)
 
 func confirm(id: StringName, roll_bonus: int = 0) -> bool:

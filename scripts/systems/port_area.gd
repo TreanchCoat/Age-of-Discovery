@@ -40,14 +40,15 @@ func _make_prompt() -> void:
 	layer.add_child(_prompt)
 
 func _on_body_entered(body: Node3D) -> void:
-	if def and body is ShipController:
+	# is_player: NPC ships (ShipController subclasses) must not trigger docking.
+	if def and body is ShipController and body.is_player:
 		_ship_in_range = body
 		if GameState.current_port == &"":
 			_prompt.text = "Press E to dock at %s" % def.display_name
 			_prompt.show()
 
 func _on_body_exited(body: Node3D) -> void:
-	if def and body is ShipController:
+	if def and body is ShipController and body.is_player:
 		_ship_in_range = null
 		_prompt.hide()
 		if GameState.current_port == def.id:

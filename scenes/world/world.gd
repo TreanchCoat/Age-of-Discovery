@@ -5,10 +5,14 @@ extends Node3D
 
 const SHIP_SCENE := preload("res://scenes/ship/ship.tscn")
 const PORT_SCENE := preload("res://scenes/port/port.tscn")
+const HUD_SCENE := preload("res://scenes/ui/hud.tscn")
+const NPC_SHIP_SCENE := preload("res://scenes/ship/npc_ship.tscn")
+
+## Terrain backend switch: Terrain3D (new) vs HeightmapTerrain (legacy fallback).
+@export var use_terrain3d := true
 const DEFAULT_SPAWN := Vector3(818, 1.5, -900)  # open water just off Lisbon
 
-var _status_label: Label
-var _sail_label: Label
+var _hud: HUD
 var _ship: ShipController
 var _wind: WindSystem
 var _ocean: Node3D            # the FFT ocean (Water node), instanced from ocean.tscn
@@ -33,7 +37,7 @@ func _ready() -> void:
 	add_child(PortMarketUI.new())
 	var map := WorldMapUI.new()
 	add_child(map)
-	map.map_texture = load("res://assets/terrain/region_preview.png")
+	map.map_texture = load("res://assets/terrain/region_preview_hires.png")
 	map.register_ship(ship)
 	var events := VoyageEventSystem.new()
 	events.wind = wind
@@ -41,6 +45,7 @@ func _ready() -> void:
 	var event_ui := VoyageEventUI.new()
 	event_ui.system = events
 	add_child(event_ui)
+	_spawn_pirate(ship, wind)
 	var spyglass := SpyglassUI.new()
 	spyglass.ship = ship
 	ship.use_fallback_observe = false
@@ -60,12 +65,17 @@ func _ready() -> void:
 	var objective_ui := ObjectiveUI.new()
 	objective_ui.system = objectives
 	add_child(objective_ui)
+	add_child(CharacterSheetUI.new())      # C — skills / inventory / stats
+	add_child(DiscoveryJournalUI.new())    # J — journal of discoveries
+	GameState.rebuild_sheet()              # apply skill+equipment modifiers
 	_make_audio()
 	# Autosave every time we dock (current_port is set before this signal fires).
 	EventBus.port_entered.connect(func(_p): autosave())
 	# Market UI "Enter the city" -> street mode; "Return to ship" -> ship camera.
 	EventBus.city_enter_requested.connect(_on_city_enter_requested)
 	EventBus.city_left.connect(_on_city_left)
+	# Sunk enemies pay out (placeholder until strike-colors/plunder exists).
+	EventBus.ship_sunk.connect(_on_ship_sunk)
 	_make_hud()
 	# If the save was made while docked, current_port is set but no port_entered
 	# ever fired this session — the game would be stuck "half-docked" (market
@@ -73,6 +83,13 @@ func _ready() -> void:
 	# UI above has connected) to restore the docked state properly.
 	if GameState.current_port != &"":
 		EventBus.port_entered.emit.call_deferred(GameState.current_port)
+
+func _on_ship_sunk(ship: Node3D) -> void:
+	if ship is ShipController and not ship.is_player:
+		GameState.gold += 150
+		GameState.stats.add_fame(&"battle", 25)
+		if _hud:
+			_hud.toast("She's going down! Salvaged 150 gold from the wreck.")
 
 func _on_city_enter_requested(city_id: StringName) -> void:
 	var city: CityScene = _cities.get(city_id)
@@ -87,6 +104,53 @@ func _on_city_left(_city_id: StringName) -> void:
 		if cam:
 			cam.make_current()
 	_fade_ambience(-6.0)
+
+## Combat step 0: one pirate at anchor west of the spawn lane. Anchored until
+## the player closes to aggro range, then raises sails and chases. Real body:
+## ships collide instead of ghosting. See npc_ship.gd for the upgrade path.
+func _spawn_pirate(player_ship: ShipController, wind: WindSystem) -> void:
+	var pirate: NPCShip = NPC_SHIP_SCENE.instantiate()
+	pirate.wind = wind      # AI sails the same wind physics now
+	pirate.target = player_ship
+	pirate.position = Vector3(600, 1.5, -900)  # deep water, ~220 west of spawn
+	pirate.rotation.y = -PI / 2.0              # anchored facing east, toward the lane
+	add_child(pirate)
+	# Same buoyancy wiring as the player ship (node refs in code, per the rules).
+	var buoyancy := pirate.get_node_or_null(^"Buoyancy") as ShipBuoyancy
+	if buoyancy:
+		buoyancy.hull_pivot = pirate.get_node(^"HullPivot")
+		buoyancy.ship = pirate
+		buoyancy.wind = wind
+		if _ocean:
+			buoyancy.ocean = _ocean
+		else:
+			buoyancy.enabled = false
+
+## TEMP DIAGNOSTIC (remove once terrain placement is verified): measures the
+## live Terrain3D height at known probe points and prints them against the
+## expected values from the source data. If measured != expected, the pattern
+## tells us the transform error (offset / flip / scale).
+func _t3d_diagnostic(t: Node3D) -> void:
+	print("=== Terrain3D diagnostic ===")
+	print("vertex_spacing = ", t.call(&"get_vertex_spacing"))
+	print("data_directory = ", t.get("data_directory"))
+	var data: Object = t.get("data")
+	if data == null:
+		print("NO DATA OBJECT")
+		return
+	print("active regions = ", data.call(&"get_regions_active").size())
+	var probes := [
+		["spawn      ", Vector3(818, 0, -900), -30.85],
+		["lisbon     ", Vector3(999, 0, -906), -0.51],
+		["funchal    ", Vector3(-1106, 0, 1125), -26.36],
+		["origin     ", Vector3(0, 0, 0), -291.67],
+		["iberia_mtn ", Vector3(1300, 0, -700), 8.60],
+		["dragon_rock", Vector3(-280, 0, 180), -286.47],
+	]
+	for p in probes:
+		var measured: float = data.call(&"get_height", p[1])
+		print("%s world(%6.0f,%6.0f)  measured=%8.2f   expected=%8.2f" % [p[0], p[1].x, p[1].z, measured, p[2]])
+	print("=== end diagnostic ===")
 
 ## Snapshot ship position into flags, then save everything. Called on docking
 ## and from the pause menu's "Save & Main Menu".
@@ -156,18 +220,49 @@ func _make_sea() -> void:
 	_far_ocean = far
 
 func _spawn_land() -> void:
-	# Greybox landmasses near each city: a solid island (collides + damages) ringed
-	# by a shallow-water band (slows + slowly scrapes the hull). Positioned clear of
-	# each port's dock circle and the approach lane between the two cities.
-	# Real terrain from the GEBCO heightmap crop (Iberia / Madeira). Sea level = y 0.
-	var terrain := HeightmapTerrain.new()
-	terrain.name = "Terrain"
-	add_child(terrain)
+	# Terrain backend A/B (PROJECT_PLAN §4 Layer 2):
+	#  - Terrain3D (new): native-res GEBCO import from assets/terrain/t3d_data,
+	#    clipmap LOD, in-editor sculpting. vertex_spacing 2.0 — see terrain3d_meta.json.
+	#  - HeightmapTerrain (old): kept as fallback until the new path is proven.
+	# Toggle `use_terrain3d` on the World root in the inspector.
+	# NOTE: Terrain3D has no port flatten-aprons — harbors get hand-sculpted.
+	var world_sz := Vector2(3236.0, 4000.0)
+	var mask_path := "res://assets/terrain/region_landmask.png"
+	var t3d_ok: bool = use_terrain3d and ClassDB.class_exists(&"Terrain3D") \
+		and DirAccess.dir_exists_absolute("res://assets/terrain/t3d_data")
+	if t3d_ok:
+		var t := ClassDB.instantiate(&"Terrain3D") as Node3D
+		t.name = "Terrain"
+		t.add_to_group("land")
+		add_child(t)
+		# Configure AFTER add_child and via setter calls — set() before the node
+		# entered the tree silently failed once (terrain rendered at half size).
+		t.call(&"set_vertex_spacing", 2.0)
+		t.set("data_directory", "res://assets/terrain/t3d_data")
+		t.set("collision_mode", 3)  # 3 = Full / Game (see Terrain3DCollision enum)
+		# Textures: if the team has saved an assets resource from the dock, use it.
+		if ResourceLoader.exists("res://assets/terrain/terrain3d_assets.tres"):
+			t.set("assets", load("res://assets/terrain/terrain3d_assets.tres"))
+		if ResourceLoader.exists("res://assets/terrain/terrain3d_material.tres"):
+			t.set("material", load("res://assets/terrain/terrain3d_material.tres"))
+		# Guard against silent property failures — the bug class we just had.
+		var spacing: float = t.call(&"get_vertex_spacing")
+		if not is_equal_approx(spacing, 2.0):
+			push_warning("Terrain3D vertex_spacing=%s (expected 2.0) — terrain will be misscaled!" % spacing)
+		mask_path = "res://assets/terrain/region_landmask_hires.png"
+		_t3d_diagnostic.call_deferred(t)
+	else:
+		if use_terrain3d:
+			push_warning("Terrain3D unavailable (plugin or t3d_data missing) — using HeightmapTerrain")
+		var terrain := HeightmapTerrain.new()
+		terrain.name = "Terrain"
+		add_child(terrain)
+		world_sz = terrain.world_size
 	# Tell the ocean shader where land is, so waves are not drawn over the terrain.
 	var wm := load("res://assets/water/mat_water.tres") as ShaderMaterial
 	if wm:
-		wm.set_shader_parameter("terrain_landmask", load("res://assets/terrain/region_landmask.png"))
-		wm.set_shader_parameter("terrain_rect", Vector4(0.0, 0.0, terrain.world_size.x, terrain.world_size.y))
+		wm.set_shader_parameter("terrain_landmask", load(mask_path))
+		wm.set_shader_parameter("terrain_rect", Vector4(0.0, 0.0, world_sz.x, world_sz.y))
 
 func _make_landmass(center: Vector3, radius: float, shallow_width: float) -> void:
 	var shallow_r := radius + shallow_width
@@ -254,6 +349,7 @@ func _spawn_ship(wind: WindSystem) -> ShipController:
 	# World only injects what exists at runtime: wind, ocean, spawn position.
 	var ship: ShipController = SHIP_SCENE.instantiate()
 	ship.wind = wind
+	ship.ship_state = GameState.ship  # the player's hull sails the player's state
 	# Continue: resume where the last autosave left the ship; else default spawn.
 	var saved_pos: Variant = GameState.flags.get("ship_pos")
 	if saved_pos is Array and saved_pos.size() == 3:
@@ -274,75 +370,11 @@ func _spawn_ship(wind: WindSystem) -> ShipController:
 	return ship
 
 func _make_hud() -> void:
-	var hud := CanvasLayer.new()
-	_status_label = Label.new()
-	_status_label.name = "Status"
-	_status_label.position = Vector2(12, 12)
-	hud.add_child(_status_label)
-	_sail_label = Label.new()
-	_sail_label.name = "SailInfo"
-	_sail_label.position = Vector2(12, 36)
-	hud.add_child(_sail_label)
-	var helm := HelmIndicator.new()
-	helm.name = "Helm"
-	helm.ship = _ship
-	helm.anchor_left = 0.5
-	helm.anchor_right = 0.5
-	helm.anchor_top = 1.0
-	helm.anchor_bottom = 1.0
-	helm.offset_left = -60.0
-	helm.offset_right = 60.0
-	helm.offset_top = -150.0
-	helm.offset_bottom = -30.0
-	hud.add_child(helm)
-	var minimap := MinimapUI.new()
-	minimap.name = "Minimap"
-	minimap.ship = _ship
-	minimap.wind = _wind
-	minimap.map_texture = load("res://assets/terrain/region_preview.png")
-	minimap.world_size = Vector2(3236.0, 4000.0)
-	minimap.anchor_left = 1.0
-	minimap.anchor_right = 1.0
-	minimap.anchor_top = 0.0
-	minimap.anchor_bottom = 0.0
-	minimap.offset_left = -176.0
-	minimap.offset_right = -16.0
-	minimap.offset_top = 16.0
-	minimap.offset_bottom = 176.0
-	hud.add_child(minimap)
-	var compass := CompassUI.new()
-	compass.name = "Compass"
-	compass.ship = _ship
-	compass.anchor_left = 1.0
-	compass.anchor_right = 1.0
-	compass.anchor_top = 0.0
-	compass.anchor_bottom = 0.0
-	compass.offset_left = -274.0
-	compass.offset_right = -184.0
-	compass.offset_top = 16.0
-	compass.offset_bottom = 106.0
-	hud.add_child(compass)
-	add_child(hud)
-	_update_status()
-	EventBus.hour_passed.connect(_on_status_tick)
-	EventBus.gold_changed.connect(_on_status_tick)
-	EventBus.port_entered.connect(_on_status_tick)
-	EventBus.port_left.connect(_on_status_tick)
-	EventBus.discovery_made.connect(_on_discovery_made)
-
-func _on_status_tick(_arg) -> void:
-	_update_status()
-
-func _update_status() -> void:
-	var where := "At sea"
-	if GameState.current_port != &"":
-		where = "In port: " + String(GameState.current_port)
-	_status_label.text = "%s | Gold: %d | %s" % [WorldClock.time_string(), GameState.gold, where]
-
-func _on_discovery_made(id: StringName) -> void:
-	var def := DiscoveryDB.get_def(id)
-	if def:
-		_status_label.text = "DISCOVERY: %s — %s" % [def.display_name, def.lore]
+	# The HUD is a scene now (scenes/ui/hud.tscn) — layout lives in the editor,
+	# logic in hud.gd. world only instances it and injects runtime refs.
+	_hud = HUD_SCENE.instantiate()
+	add_child(_hud)
+	_hud.setup(_ship, _wind)
 
 func _process(delta: float) -> void:
 	# Keep the ocean centred on the ship (snapped to whole units to avoid jitter).
@@ -350,25 +382,4 @@ func _process(delta: float) -> void:
 		_ocean.global_position = Vector3(roundf(_ship.global_position.x), 0.0, roundf(_ship.global_position.z))
 	if _far_ocean and _ship:
 		_far_ocean.global_position = Vector3(roundf(_ship.global_position.x), -0.2, roundf(_ship.global_position.z))
-	if _ship == null or _sail_label == null:
-		return
-	var f := "%d%%" % roundi(_ship.horizontal_sail * 100.0)
-	var b := "%d%%" % roundi(_ship.vertical_sail * 100.0)
-	var wind_word := "-"
-	if _wind:
-		var align := _wind.alignment(-_ship.global_transform.basis.z)
-		if align > 0.4:
-			wind_word = "astern (favors horizontal sail)"
-		elif align < -0.4:
-			wind_word = "ahead (turn to catch it)"
-		else:
-			wind_word = "abeam (favors vertical sail)"
-	var helm := "centered"
-	if _ship.wheel > 0.05:
-		helm = "port %.0f%%" % (_ship.wheel * 100.0)
-	elif _ship.wheel < -0.05:
-		helm = "starboard %.0f%%" % (-_ship.wheel * 100.0)
-	var hull := ""
-	if GameState.ship and GameState.ship.def:
-		hull = "   Hull: %d/%d" % [GameState.ship.durability, GameState.ship.max_durability()]
-	_sail_label.text = "Horizontal [F]: %s   Vertical [G]: %s   Helm: %s   Pace: %.0f%%   Wind: %s   Speed: %.1f%s" % [f, b, helm, _ship.pace * 100.0, wind_word, _ship.current_speed, hull]
+	# (Sail/status readouts moved into hud.gd — the HUD scene owns them now.)

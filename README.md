@@ -11,7 +11,10 @@ Controls:
 - **Mouse wheel** — zoom the camera in/out
 - **E** — observe a spotted discovery
 - **M** — toggle the world map
+- **C** — Captain's Sheet (skills / inventory / stats)
+- **J** — Journal of Discoveries
 - **Esc** — pause menu (Resume / Settings with volume / Save & Main Menu)
+- **WASD** — walk when ashore (enter cities from the port screen)
 - **` (backtick)** — debug panel (wind, teleport, ship/gold, time/events, live ocean wave tuning)
 
 Both sails start down, so you begin dead in the water — raise at least one to get moving. Sail into a port's circle to auto-dock: you'll see **Voyage Successful** and the market opens.
@@ -28,7 +31,7 @@ Both sails start down, so you begin dead in the water — raise at least one to 
 - `scenes/` — `menu/main_menu.tscn` (main scene) · `world/world.tscn` · `ship/ship.tscn` · `port/port.tscn`
 - `assets/` — the **FFT ocean** (water scripts, shaders, `ocean.tscn`), GEBCO terrain, ship model, audio loops
 
-Docs: `DOCUMENTATION.md` (file-by-file reference) · `LEARNING_GODOT.md` (Godot taught through this project) · `PROJECT_PLAN.md` (roadmap + current status) · `OCEAN_INTEGRATION.md` (ocean architecture + buoyancy plan).
+Docs: `DOCUMENTATION.md` (file-by-file reference; §11 = how to add skills/items/NPCs/facilities) · `PROJECT_PLAN.md` (roadmap + current status + known issues) · `LAND_PLAN.md` (the land owner's roadmap: cities as scenes, inland travel, wild landings, land combat) · `OCEAN_INTEGRATION.md` (ocean architecture) · `LEARNING_GODOT.md` (Godot taught through this project).
 
 ## Adding content (no code needed)
 

@@ -1,0 +1,37 @@
+{
+  "width": 1618,
+  "height": 2000,
+  "vertex_spacing": 2.0,
+  "world_size": [
+    3236.0,
+    4000.0
+  ],
+  "bbox": {
+    "lon_w": -18.8,
+    "lon_e": -6.8,
+    "lat_s": 30.0,
+    "lat_n": 42.0
+  },
+  "curve": {
+    "land_near_slope": 0.06,
+    "land_max_height": 60.0
+  },
+  "baked_min": -355.23089599609375,
+  "baked_max": 58.86761474609375,
+  "src_cells": [
+    2880,
+    2880
+  ],
+  "note": "float32 row-major, row 0 = north (Z=-2000); heights are FINAL world Y (curve baked)",
+  "padded": {
+    "width": 2048,
+    "height": 2048,
+    "pad_x": 215,
+    "pad_z": 24,
+    "import_position": [
+      -2048,
+      -2048
+    ],
+    "note": "corner region-aligned at vertex (-1024,-1024) so the importer's floor-to-region cannot shift it; data still centered on origin, world coverage -2048..2048 at spacing 2.0"
+  }
+}

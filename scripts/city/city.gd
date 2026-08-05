@@ -27,6 +27,7 @@ extends Node3D
 var _street_level: Node3D
 var _buildings: Node3D
 var _player: CityPlayer
+var _npcs: Array[NPCCharacter] = []
 var _toast: Label
 var _return_btn: Button
 var _toast_timer: SceneTreeTimer
@@ -52,16 +53,37 @@ func enter_street_mode() -> void:
 	var spawn := get_node_or_null(^"StreetLevel/PlayerSpawn") as Node3D
 	_player.global_position = spawn.global_position if spawn else global_position + Vector3.UP * 2.0
 	_make_toast_ui()
+	_spawn_npcs()
 	# "Return to ship" only makes sense when entered from the game (docked);
 	# in a standalone F6 run the button still shows but city_left has no listener.
 	if _return_btn:
 		_return_btn.show()
+
+## NPCs whose NPCDef.home_city matches this city appear in street mode,
+## scattered around the player spawn. Data-driven: data/npcs/*.tres.
+func _spawn_npcs() -> void:
+	var spawn := get_node_or_null(^"StreetLevel/PlayerSpawn") as Node3D
+	var center: Vector3 = spawn.global_position if spawn else global_position
+	for def in NPCDB.for_city(city_id):
+		var npc := NPCCharacter.new()
+		npc.def = def
+		add_child(npc)
+		var offset := Vector2.from_angle(randf_range(0.0, TAU)) * randf_range(4.0, 12.0)
+		npc.global_position = center + Vector3(offset.x, 1.0, offset.y)
+		_npcs.append(npc)
+
+func _free_npcs() -> void:
+	for npc in _npcs:
+		if is_instance_valid(npc):
+			npc.queue_free()
+	_npcs.clear()
 
 func exit_street_mode() -> void:
 	if _player == null:
 		return
 	_player.queue_free()
 	_player = null
+	_free_npcs()
 	_set_street_active(false)
 	if _return_btn:
 		_return_btn.hide()

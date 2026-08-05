@@ -16,6 +16,11 @@ var fleet: Array[ShipState] = []      # all owned ships, incl. active
 var current_port: StringName = &""    # empty = at sea
 var flags := {}                       # misc story/world flags
 
+# New progression exoskeleton (see DOCUMENTATION.md §11):
+var skills := SkillSet.new()          # skill levels/XP (defs in data/skills/)
+var inventory := Inventory.new()      # personal items + equipment (data/items/)
+var sheet := StatSheet.new()          # derived stats; NOT saved — rebuilt from sources
+
 func _ready() -> void:
 	if ship == null:
 		_new_game_defaults()
@@ -36,10 +41,20 @@ func new_game() -> void:
 	flags = {}
 	fleet.clear()
 	ship = null
+	skills = SkillSet.new()
+	inventory = Inventory.new()
+	sheet = StatSheet.new()
 	_new_game_defaults()
 	WorldClock.reset()
 	DiscoveryDB.reset()
 	EconomySim.reset()
+
+## Rebuild the derived StatSheet from all modifier sources. Call after load
+## or any bulk change (level-ups and equip/unequip maintain it incrementally).
+func rebuild_sheet() -> void:
+	sheet = StatSheet.new()
+	skills.apply_to(sheet)
+	inventory.apply_equipment(sheet)
 
 func save_game() -> void:
 	var data := {
@@ -53,6 +68,8 @@ func save_game() -> void:
 		"clock": WorldClock.to_dict(),
 		"discoveries": DiscoveryDB.to_dict(),
 		"economy": EconomySim.to_dict(),
+		"skills": skills.to_dict(),
+		"inventory": inventory.to_dict(),
 	}
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	f.store_string(JSON.stringify(data, "\t"))
@@ -74,4 +91,7 @@ func load_game() -> bool:
 	WorldClock.from_dict(data.get("clock", {}))
 	DiscoveryDB.from_dict(data.get("discoveries", {}))
 	EconomySim.from_dict(data.get("economy", {}))
+	skills.from_dict(data.get("skills", {}))
+	inventory.from_dict(data.get("inventory", {}))
+	rebuild_sheet()
 	return true

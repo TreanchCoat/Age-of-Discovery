@@ -14,6 +14,7 @@ signal weather_changed(weather: StringName)
 
 # Discovery
 signal discovery_spotted(discovery_id: StringName)   # in range, not yet confirmed
+signal discovery_lost(discovery_id: StringName)      # sailed out of range unconfirmed
 signal discovery_made(discovery_id: StringName)      # confirmed via observation
 
 # Economy
@@ -30,6 +31,11 @@ signal voyage_event_resolved(def: VoyageEventDef)
 signal city_building_interacted(city_id: StringName, building_type: String)
 signal city_enter_requested(city_id: StringName)   # market UI "Enter the city"
 signal city_left(city_id: StringName)              # player returned to the ship
+
+# Combat
+signal broadside_fired(ship: Node3D, side: int)
+signal ship_hit(attacker: Node3D, target: Node3D, damage: int)
+signal ship_sunk(ship: Node3D)
 
 # Objective (demo guided goal)
 signal objective_updated()

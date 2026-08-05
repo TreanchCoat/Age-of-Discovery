@@ -35,7 +35,7 @@ Systems auto-load entire folders of `.tres` files at startup (`data/goods/`, `da
 Registered in `project.godot`, alive for the whole game (they survive scene changes — which is why `GameState.new_game()` must reset them explicitly), in load order:
 
 ### EventBus — `scripts/autoload/event_bus.gd`
-Pure signal declarations, no logic. Current signals: `hour_passed`, `day_passed`, `port_entered/left`, `undock_requested`, `weather_changed`, `discovery_spotted/made`, `trade_executed`, `prices_updated`, `supplies_short`, `voyage_event_fired/resolved`, `fame_changed`, `gold_changed`.
+Pure signal declarations, no logic. Current signals: `hour_passed`, `day_passed` · `port_entered/left`, `undock_requested`, `weather_changed` · `discovery_spotted/lost/made` · `trade_executed`, `prices_updated` · `supplies_short`, `voyage_event_fired/resolved` · `city_building_interacted`, `city_enter_requested`, `city_left` · `objective_updated/completed` · `fame_changed`, `gold_changed`. (`city_*` become `location_*` when the land owner's LandManager lands — see `LAND_PLAN.md`.)
 
 ### WorldClock — `scripts/autoload/world_clock.gd`
 Converts real seconds to game minutes (`MINUTES_PER_REAL_SECOND`, default 2.0 → one game day per 12 real minutes). Emits `hour_passed`/`day_passed` through EventBus; all simulation hangs off these ticks. `total_minutes` is the single source of truth — events that "cost time" (e.g. riding out a storm) just add to it.
@@ -58,8 +58,10 @@ Each port's market: `market[port_id][good_id] = {supply, baseline, fluct}`. **Ev
 ### DiscoveryDB — `scripts/autoload/discovery_db.gd`
 Catalog of all DiscoveryDefs + record of what's found. The discovery flow:
 
-1. `spot(id)` — ship entered a DiscoveryArea. Emits `discovery_spotted`. Unconfirmed.
+1. `spot(id)` — ship entered a DiscoveryArea. Emits `discovery_spotted` (re-emits on re-entry). Sailing out unconfirmed emits `discovery_lost` and the banner drops — the banner is always range-honest.
 2. `confirm(id, roll_bonus)` — skill check: `observation + roll_bonus + d20 >= difficulty`. On success: fame + gold rewards, observation skill grows by 1 (learn-by-doing), emits `discovery_made`. The `roll_bonus` (+10) comes from a clean spyglass minigame hit.
+
+Found entries feed the **Journal (J)**; `DiscoveryDef.hidden` keeps quest/myth discoveries out of it until found. Agreed direction: some discoveries random, some quest-tied, some quest-STARTING (finding them opens a quest); historical setting with mythic seasoning — designed properly once the quest framework lands.
 
 ---
 
@@ -153,10 +155,10 @@ Modal popup (`PROCESS_MODE_ALWAYS`, pauses the tree). Shows title + flavor text,
 
 ## 6. UI — `scripts/ui/`
 
-All UI is built from code (greybox); replace with designed scenes later without touching systems.
+Most UI is still built from code (greybox); the HUD is a scene (`scenes/ui/hud.tscn`) — migrate others the same way as they stabilize.
 
 ### PortMarketUI — `port_market_ui.gd`
-Opens **centered** on `port_entered` with a green "Voyage Successful — Welcome to {Port}" banner. Per good at this port: live price, held quantity, Buy/Sell ×1/×10 (every good trades at every port). Footer: water/food + Resupply button (via SupplySystem), cargo weight. The "Weigh anchor — set sail" button emits `undock_requested` (respawns the ship at sea) and closes the panel. Subscribes to `prices_updated`/`trade_executed`/`gold_changed`.
+Opens **centered** on `port_entered` with a green "Voyage Successful — Welcome to {Port}" banner. Per good at this port: live price, held quantity, Buy/Sell ×1/×10 (every good trades at every port). Footer: water/food + Resupply button (via SupplySystem), cargo weight. **"Enter the city"** (visible only where a city scene exists) hides the panel and emits `city_enter_requested`; the panel reopens on `city_left`. The "Weigh anchor — set sail" button emits `undock_requested` (respawns the ship at sea) and closes the panel. Subscribes to `prices_updated`/`trade_executed`/`gold_changed`.
 
 ### WorldMapUI — `world_map_ui.gd`
 Toggled with M. Square map (600px) mapping world XZ (±`world_extent`, default 2000) to map UV.
@@ -174,8 +176,11 @@ Discovery confirmation minigame:
 
 ### VoyageEventUI — see §5.
 
-### HUD — built in `world.gd._make_hud()`
-Top-left: status line (time, gold, port/at-sea, flashes discovery lore) plus a sail readout updated every frame — horizontal/vertical sail %, helm position, pace %, wind-angle word, speed.
+### HUD — `scenes/ui/hud.tscn` + `hud.gd`
+The at-sea HUD is a **scene** — widgets are laid out in the editor, `world.gd` just instances it and calls `setup(ship, wind)` (runtime refs injected in code, per the golden rules). `hud.gd` owns the status line (time/gold/port, discovery flash), the per-frame sail readout, and **`toast(text)`** — the transient bottom-center message channel (use it for voyage-event effect feedback). Widget children (Minimap/Compass/Helm) keep their own scripts. Adding a widget: add the node in `hud.tscn`, script it, wire refs in `setup()` if needed.
+
+### DiscoveryJournalUI — `discovery_journal_ui.gd`
+Toggled with **J**. Every discovery as a card: found → name, category, day charted, lore; unfound → "???" with a category hint (a to-do list for explorers); `DiscoveryDef.hidden = true` entries are absent until found — the hook for quest-gated/mythic discoveries revealed by rumors or quests.
 
 ### MinimapUI — `minimap_ui.gd`
 Always-on, top-right. North-up, centered on the player (gold triangle, rotates with heading); cities are blue dots placed relative to you (clamped to the edge beyond `range_units`). A small cyan arrow in the corner shows wind direction.
@@ -219,7 +224,7 @@ Esc (`ui_cancel`) pauses the tree and shows Resume / Settings (volume slider) / 
 5. The ship — instances **`ship.tscn`**, injects wind/ocean into it and its Buoyancy node (node refs wired in code, not scene exports), spawns at the last autosaved position (`flags["ship_pos"]`) or the default off Lisbon.
 6. PortMarketUI, WorldMapUI (registered to ship), VoyageEventSystem + UI, SpyglassUI (disables the ship's fallback observe), DebugUI, PauseMenu (given `world` for autosave).
 7. Ocean ambience audio (`_make_audio()`, loops, keeps playing while paused).
-8. HUD: status + sail readout, MinimapUI, CompassUI, HelmIndicator. *(Still code-built — next candidate for scene migration.)*
+8. HUD: instances `scenes/ui/hud.tscn` (status, sail readout, minimap, compass, helm, toast area) + CharacterSheetUI (C) + DiscoveryJournalUI (J).
 
 `world.autosave()` snapshots the ship position into `flags["ship_pos"]` and calls `GameState.save_game()`; it runs on every `port_entered` and from the pause menu.
 
@@ -233,7 +238,7 @@ Esc (`ui_cancel`) pauses the tree and shows Resume / Settings (volume slider) / 
 - **Adding a signal?** Declare in EventBus only; emit from the owning system.
 - **Adding a system?** Node in the world scene if it needs the scene/ticks via EventBus; autoload only if it must survive scene changes or be globally addressable.
 - **Pause behavior:** modal UIs (events, spyglass) set `get_tree().paused = true` and run with `PROCESS_MODE_ALWAYS`. WorldClock pauses with the tree, so paused time costs nothing.
-- **Input actions** are predefined in `project.godot` (no manual setup): `turn_left` (A), `turn_right` (D), `toggle_horizontal_sail` (F), `toggle_vertical_sail` (G), `observe` (E), `toggle_map` (M). Pause is the built-in `ui_cancel` (Esc). Camera zoom is mouse-wheel, handled directly in ShipController (not an action).
+- **Input actions** are predefined in `project.godot` (no manual setup): `turn_left` (A), `turn_right` (D), `toggle_horizontal_sail` (F), `toggle_vertical_sail` (G), `observe` (E), `toggle_map` (M), `toggle_character` (C), `toggle_journal` (J), `walk_*` (WASD on foot). Pause is the built-in `ui_cancel` (Esc). Camera zoom is mouse-wheel, handled directly in ShipController (not an action).
 - **Hand-authored `.tscn` files:** open in the editor and save once to canonicalize. Don't rely on exported node references in hand-written scenes — wire node refs in code (see `ship_visual.gd`, `world.gd`).
 - **Shader globals:** the FFT ocean's shaders use `global uniform`s registered in `project.godot` `[shader_globals]` (`water_color`, `foam_color`, `num_cascades`, `displacements`, `normals`). If the water shader fails to compile saying a global "does not exist", they're missing.
 - **Ocean mesh LODs:** `assets/water/clipmap_*.obj.import` must keep `generate_lods=false`. If a reimport flips it on, the waves flatten into smooth swells (4.7 decimates the clipmap). See `OCEAN_INTEGRATION.md`.
@@ -256,3 +261,130 @@ The same `to_dict()` data is the future co-op sync format, so keeping it clean p
 **Immediate next: M5** — guided objective tracked on the HUD + voyage summary screen, then a Windows export (see `PROJECT_PLAN.md` §3). M3 leftovers in parallel: migrate the HUD to `hud.tscn`, more goods + a 3rd port when ready, spyglass tuning.
 
 **Post-demo:** the land & cities visual roadmap (`PROJECT_PLAN.md` §4 — terrain shader polish → Terrain3D migration → city scenes with sea-visible LOD), then the parking lot: quests/taverns, fame consumption, shipyard (the sail-mount API in `ship_visual.gd` is waiting for it), fleet/crew depth, factions, naval combat, co-op replication of the State layer.
+
+---
+
+## 11. The progression exoskeleton (skills, items, NPCs, facilities)
+
+Six empty-but-wired frameworks added so future features are content drops, not engineering. **Nothing ships in them yet by design.** UI: press **C** in game for the Captain's Sheet (skills / inventory / stats). All state saves automatically (`GameState.skills` / `.inventory` in the save JSON) and resets on New Game.
+
+### 11.1 StatSheet — the modifier engine (`scripts/core/stat_sheet.gd`)
+
+Every tunable number can be a stat: `value(stat) = (base + Σ add) × Π mul`. Modifiers are tagged by source (`&"skill:navigation"`, `&"equip:spyglass"`) and removed by source — re-applying is always `remove_source()` + add, so nothing double-stacks. The player's sheet is `GameState.sheet`; it is **derived, never saved** — `GameState.rebuild_sheet()` reconstructs it from skills + equipment after load.
+
+To make an existing system read a stat (the adoption pattern, one line):
+```gdscript
+var radius := def.spot_radius * (1.0 + GameState.sheet.value(&"spot_radius_pct") / 100.0)
+```
+**Stat vocabulary** (grow this list as stats get consumed; agree on names here):
+`spot_radius_pct` · `ship_speed_pct` · `turn_rate_pct` · `trade_discount_pct` · `supply_use_pct` · `event_chance_pct` · `spyglass_sweet_pct`. Nothing consumes these yet — wire them into ShipController/EconomySim/etc. as skills and gear that grant them appear.
+
+### 11.2 Skills (`SkillDef` + `SkillSet` + `SkillDB`)
+
+Defs in `data/skills/*.tres`, auto-loaded. State (levels/XP) in `GameState.skills`. Learn-by-doing: gameplay calls `SkillDB.grant_player_xp(&"navigation", 5.0)` at the matching moment (a day sailed, a trade closed) — level-ups auto-refresh the sheet. Passive effects are per-level `StatModDef`s; active skills set `ability_id` (hook only for now).
+
+**Add a skill** — save as `data/skills/navigation.tres`:
+```
+[gd_resource type="Resource" script_class="SkillDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/skill_def.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/data/stat_mod_def.gd" id="2"]
+
+[sub_resource type="Resource" id="mod1"]
+script = ExtResource("2")
+stat = &"ship_speed_pct"
+add_per_level = 0.0
+percent_per_level = 1.5
+
+[resource]
+script = ExtResource("1")
+id = &"navigation"
+display_name = "Navigation"
+category = "sailing"
+description = "Reading wind and water. Grows with every day at sea."
+max_level = 10
+base_xp = 100.0
+xp_growth = 1.5
+modifiers = Array[Resource]([SubResource("mod1")])
+```
+Then hook its XP source, e.g. in a `day_passed` listener: `SkillDB.grant_player_xp(&"navigation", 10.0)`. It appears on the Captain's Sheet immediately.
+
+### 11.3 Items & equipment (`ItemDef` / `EquipmentDef` + `Inventory` + `ItemDB`)
+
+Defs in `data/items/*.tres`. Personal items ≠ trade goods (those stay `GoodDef`/CargoHold). Equipment declares a `slot` (free-form StringName — current vocabulary: `spyglass`, `weapon`, `coat`; ship slots `cannon`, `sail_main`, `sail_fore` reserved for the shipyard). `GameState.inventory.equip(&"brass_spyglass", GameState.sheet)` swaps slots and applies modifiers; granting items is `GameState.inventory.add(&"id")` or a RewardBundle.
+
+**Add an equipment item** — `data/items/brass_spyglass.tres`:
+```
+[gd_resource type="Resource" script_class="EquipmentDef" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/equipment_def.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/data/stat_mod_def.gd" id="2"]
+
+[sub_resource type="Resource" id="mod1"]
+script = ExtResource("2")
+stat = &"spot_radius_pct"
+percent_per_level = 20.0
+
+[resource]
+script = ExtResource("1")
+id = &"brass_spyglass"
+display_name = "Brass Spyglass"
+category = "equipment"
+description = "A merchant officer's glass. Spots sails a league further."
+base_price = 800
+slot = &"spyglass"
+modifiers = Array[Resource]([SubResource("mod1")])
+```
+(For equipment, `percent_per_level`/`add_per_level` apply once, not per level.)
+
+### 11.4 NPCs (`NPCDef` + `NPCCharacter` / `NPCCaptain` + `NPCDB`)
+
+Defs in `data/npcs/*.tres`; anyone with `home_city = &"lisbon"` spawns in Lisbon's street mode automatically (wanders near the plaza, E to talk — lines cycle from the def; toast UI until the dialogue framework exists). `NPCCaptain` is the sea-side chassis: parent it to any Node3D and it patrols waypoints / approaches / flees — **placeholder motion**; at combat time it switches to feeding real ship inputs, but its API (states, waypoints, target) is what AI work should build against.
+
+**Add an NPC** — `data/npcs/old_mateus.tres`:
+```
+[gd_resource type="Resource" script_class="NPCDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/data/npc_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"old_mateus"
+display_name = "Old Mateus"
+role = "sailor"
+home_city = &"lisbon"
+color = Color(0.55, 0.4, 0.3, 1)
+lines = Array[String](["Forty years before the mast, boy.", "Mind the shallows past the headland."])
+```
+
+### 11.5 Requirements & rewards (`Requirement` / `RewardBundle`)
+
+The two primitives every future system shares. `Requirement` covers gold/skill/fame/flag/discovery/item checks — build an `Array[Requirement]` and call `Requirement.all_met(reqs)`; each also has `describe()` for UI. `RewardBundle.grant()` pays out gold/fame/items/skill-XP/flags in one call. Use these in quests, dialogue choices, facility actions, titles — never hand-roll the checks again.
+
+### 11.6 Facilities (`Facility` + `Facilities` autoload)
+
+City buildings route through the `Facilities` registry: registered type → its screen opens; unregistered → "not yet open" toast. The tavern is registered as the working example.
+
+**Add a facility** (e.g. the bank): create `scripts/ui/facilities/bank_facility.gd`:
+```gdscript
+class_name BankFacility
+extends Facility
+
+func facility_title() -> String:
+	return "Bank of %s" % String(city_id).capitalize()
+
+func _build_content(box: VBoxContainer) -> void:
+	var l := Label.new()
+	l.text = "Deposits, loans, letters of credit."
+	box.add_child(l)
+	# buttons -> real logic; gate options with Requirement, pay with RewardBundle
+```
+then one line in `facilities.gd _ready()`:
+```gdscript
+register(&"bank", preload("res://scripts/ui/facilities/bank_facility.gd"))
+```
+The frame (dim, panel, title, Leave button, Esc-closes) is inherited.
+
+### 11.7 Integration status & adoption plan
+
+Built but deliberately not yet consuming each other: `CharacterStats`' five hardcoded ints still drive spyglass/events (migrate them to real SkillDefs when the first skills land — then `stats.observation` reads become `skills.level(&"observation")` + sheet stats); ship speed doesn't read the sheet yet; no XP sources are wired. Each adoption is a one-line change at the call site — that's the point of the exoskeleton.

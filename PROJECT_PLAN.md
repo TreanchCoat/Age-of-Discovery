@@ -24,16 +24,30 @@ Engine is **Godot 4.7**. Nearly everything except the M5 finish line is built:
 
 - **Sailing:** two-sail model (horizontal/square + vertical/fore-aft), steering-wheel helm with momentum + minimum steerage, pace (50→100%) affecting speed & turning, gradual sail furl. Drifting wind (direction + strength) drives ship *and* waves.
 - **World:** the **FFT ocean** (realistic *GodotOceanWaves* port — see `OCEAN_INTEGRATION.md`): follows the ship, wind-driven, far-ocean ring to ~2048. **Real GEBCO terrain** (Iberia/Madeira heightmap, saturating height curve, coastline collision + hull damage, shallow-water zones). Ship **buoyancy** on the waves (visual hull pivot, level physics).
-- **Scenes (not code-built):** `scenes/ship/ship.tscn` (hull + swappable-sail mount points + camera + buoyancy), `scenes/port/port.tscn` (PortArea + marker + name label), `scenes/menu/main_menu.tscn`.
-- **Loop:** dock/undock with "Voyage Successful" + centred market (3 goods, per-visit price variation), supplies/morale, voyage events (storm/scurvy/dolphins), discovery + spyglass minigame.
+- **Scenes (not code-built):** `scenes/ship/ship.tscn` (hull + swappable-sail mount points + camera + buoyancy), `scenes/port/port.tscn`, `scenes/menu/main_menu.tscn`, **`scenes/ui/hud.tscn`** (editor-layoutable HUD; `hud.gd` owns readouts + a `toast()` feedback channel), city scenes.
+- **Loop:** **E-to-dock prompt** (docking is a choice, not automatic) → "Voyage Successful" + centred market (3 goods, per-visit price variation) → optional **Enter the city** (street mode, "Return to ship" reopens the market) → weigh anchor. Supplies/morale, voyage events (storm/scurvy/dolphins), discovery + spyglass minigame with range-honest banner (out of range = banner drops; re-enter to re-spot).
+- **Discoveries:** spot → spyglass → confirm, plus the **Journal (J)** — found cards with lore + day charted, "???" rows for known-but-unfound, and a `hidden` def flag so quest-gated/mythic discoveries (agreed direction: some random, some quest-tied, some quest-STARTING; historical setting with room for myth — Bermuda, norse legends) don't exist on paper until revealed.
+- **Terrain extras:** flat aprons around ports (visual + collision, exports on the Terrain node) so cities sit level; ocean ambience fades out in the streets and back at sea.
 - **Game framing (M4 ✅):** main menu (New Game / Continue / Settings / Quit — project main scene), Esc pause menu (Resume / Settings / Save & Main Menu), persisted master volume (`Settings` autoload → `user://settings.cfg`), ocean ambience audio, **autosave on docking** (snapshots ship position; Continue resumes there; fog-of-war stored base64/JSON-safe).
 - **Instruments/UI:** HUD readout, minimap with map background (+ wind arrow), compass, helm dial, world map (fog of war), debug panel (backtick) with live ocean tuning.
-- **Cities (bare bones, §4 Layer 3 seeded):** `city_lisbon.tscn` / `city_funchal.tscn` — one scene, two modes: greybox skylines (typed buildings: market, shipyard, tavern, bank, governor, church, warehouse, houses) visible from the sea at their ports; disabled `StreetLevel` + walkable cube captain (WASD/E, `city_player.gd`) for street mode. F6 a city scene to walk it today; hooking street mode into docking is future work. Building interactions emit `city_building_interacted` — future facility UIs (shipyard, bank, tavern) hang off that signal.
+- **Progression exoskeleton:** six empty-but-wired frameworks (DOCUMENTATION.md §11) — StatSheet modifier engine, skills (SkillDef/SkillSet/SkillDB), items & equipment (ItemDef/EquipmentDef/Inventory/ItemDB), NPCs (NPCDef/NPCDB, city walkers + NPCCaptain sea chassis), Requirement/RewardBundle primitives, and the Facilities registry (tavern registered as the example). Captain's Sheet UI on **C**. Adding content = dropping `.tres` files in `data/skills|items|npcs/` — recipes in §11.
+- **Cities (bare bones, §4 Layer 3 seeded):** `city_lisbon.tscn` / `city_funchal.tscn` — one scene, two modes: greybox skylines (typed buildings, scaled up at sea via `sea_view_scale`) + walkable street mode (cube captain, ship-style orbit/zoom camera, NPCs spawned from `data/npcs/`, facility screens via the registry). Entered from the market's "Enter the city"; F6 for standalone testing. **NOTE: the land owner will rework street mode into separate loaded scenes — see `LAND_PLAN.md` (the land roadmap: location graph, inland cities, overland travel, wild landings, dynamic land combat).**
 - **Ship health:** hull durability + collision damage.
 
-**Immediate next: M5** — guided objective + voyage summary screen, then export a Windows build.
+**Immediate next (sea side): Terrain3D migration** (§4 Layer 2) + the sea items from Known Issues below. Land side: `LAND_PLAN.md` Phase A. Demo export still pending (M5).
 
-**Still not done:** HUD/market/map UIs are code-built, not scenes; real map art; wind audio + UI sounds; objective + summary; export. After the demo: the land & cities visual roadmap (§4).
+**Still not done:** market/world-map UIs are code-built; real map art; wind audio + UI sounds; export. After that: §4 visual roadmap, §5 combat.
+
+### Known issues (playtest #1 — owners in brackets)
+
+1. [sea] Dead upwind = too slow; add a speed floor or tacking bonus in `effective_speed`.
+2. [sea] Foam/whitecaps too strong by default (regional presets later; debug panel tunes live).
+3. [sea] Waves look steppy — likely the 0.5s wind→spectra resync; only resync past a threshold (>5° / >0.1 strength) and stretch the throttle.
+4. [joint] City scale vs terrain scale mismatch (worst at Funchal) — per-city `sea_view_scale` short-term; exaggerated island sizes at the Terrain3D re-crop long-term.
+5. [sea] Events lack feedback — pipe effect summaries through `HUD.toast()`; lower storm wind threshold + scurvy days for the demo.
+6. [sea] Camera can see under water — underwater overlay (blue fog when camera below wave height) or raise the pitch floor.
+7. [joint] Docking triggers at the city-centre cube — move dock circles to a waterfront `harbor_position` (PortDef field); pairs with the land owner's city-scene rework.
+8. [sea] Waves poke through city plazas/terrain edges — raise `flatten_height` above sea level (+ city ground) and add a shore-distance wave-amplitude fade in the water shader (also calms harbors).
 
 ---
 
@@ -42,7 +56,8 @@ Engine is **Godot 4.7**. Nearly everything except the M5 finish line is built:
 You're 2–3 people in one Godot project. The single biggest source of pain will be **merge conflicts in scene files**, so a little discipline up front saves weekends later.
 
 - **Git:** one repo, branch per feature (`feat/coastlines`, `ui/hud`), small frequent merges. Don't sit on a giant branch for three weeks.
-- **The `world.tscn` rule:** Godot scenes are text but still merge badly. **Avoid two people editing the same `.tscn` at once.** Prefer building features as *their own scene* (ship, port, and main menu already are; HUD should follow) that gets instanced, rather than everyone adding nodes to `world.tscn`. When you must touch a shared scene, call it out in chat first.
+- **The `world.tscn` rule:** Godot scenes are text but still merge badly. **Avoid two people editing the same `.tscn` at once.** Prefer building features as *their own scene* (ship, port, main menu, HUD, and cities all are now) that gets instanced, rather than everyone adding nodes to `world.tscn`. When you must touch a shared scene, call it out in chat first.
+- **Sea/land split:** the world scene, sailing, ocean, ports' dock prompts = sea owner; everything loaded after stepping ashore = land owner (`LAND_PLAN.md`, incl. the sea↔land contracts section — read it before touching the boundary).
 - **Hand-authored `.tscn` gotcha:** if a scene file was written by hand/AI, open it in the editor and **save it once** — the editor rewrites it in canonical form (uids, node ids). Exported node references in hand-written scenes are unreliable; wire node refs in code instead (see `ship_visual.gd` / `world.gd` for the pattern).
 - **`.gitignore`:** `.godot/` (import cache) stays ignored — never commit it. Commit `.tres`, `.tscn`, `.gd`, `project.godot`.
 - **Content is conflict-free:** new ports/goods/ships/events/discoveries are just new `.tres` files in `data/`. Anyone can add these anytime without stepping on code.
@@ -91,7 +106,7 @@ No dates — casual weekends. 1 session ≈ a 3–4 hour weekend sit-down.
 - [x] HUD readouts (status, sails, minimap, compass, helm).
 - [x] Market UI with per-visit price variation; resupply.
 - [x] Map background texture (terrain preview) in world map + minimap.
-- [ ] 🟡 Quartermaster — migrate HUD into `hud.tscn` (it's still code-built in `world.gd`; do this before it grows more).
+- [x] HUD migrated to `scenes/ui/hud.tscn` (editor-layoutable; `hud.gd` owns readouts + a `toast()` channel for event feedback). Discovery **journal** added (J) — found/unfound cards, `hidden` flag reserved for quest/myth reveals.
 - [ ] 🟢 Bosun — expand to ~5–6 goods and a 3rd port so buy-low/sell-high has real choice. *(Deliberately deferred for now.)*
 - [ ] 🟢 Quartermaster — spyglass tuning pass (banner timing, sweet-spot visibility).
 
@@ -123,7 +138,11 @@ The ocean now looks far better than the land. Post-M5, close that gap in three l
 - **Waterline integration** (the highest-value seam): wet-sand darkening band on terrain near y=0; shoreline foam + shallow-water tint in the water shader (it already receives `terrain_rect` + landmask — add the heightmap for depth-based effects).
 - Distance fog/haze so far coasts fade atmospherically.
 
-### Layer 2 — migrate terrain to **Terrain3D** (TokisanGames plugin) 🔴
+### Layer 2 — migrate terrain to **Terrain3D** (TokisanGames plugin) 🔴 — IN PROGRESS
+
+Status: **Phases 0–2 done.** Plugin v1.0.2-stable at `addons/terrain_3d/` (clean on 4.7). Native-res GEBCO re-extract (2880² → 1618×2000 @ 2.0 u/px, curve baked, nothing moved) → EXR → imported at world position **(−1618, −2000)** (corner placement = map centered on origin; region files in `assets/terrain/t3d_data/`, spans regions (−4,−4)..(2,3)). `world.gd` spawns Terrain3D (vertex_spacing 2.0, `land` group) behind the **`use_terrain3d` toggle** on the World root — HeightmapTerrain remains the fallback until proven. Water landmask + minimap/world map now use the hi-res versions.
+To verify in game: sharper coasts everywhere; ship still grounds + takes hull damage (checks the collider is in the `land` group — if damage stopped, tell the sea owner); cities sit on RAW coast now (no flatten aprons — sculpt harbor basins with the Terrain3D brushes; playtest issues #7/#8 get fixed there). Known nit: the easternmost ~80 world units of inland Spain got edge-clipped by the importer (no gameplay there).
+Remaining: Phase 3 (delete HeightmapTerrain + flatten code once proven; regenerate preview after sculpting) · Phase 4 (texture packs + autoshader + hand paint — the visual payoff). Island exaggeration still deferred (moves coastlines → moves ports).
 The structural fix. Clipmap LOD (same trick as the ocean — dense near, sparse far, finally *consistent*), texture splatting built in, and **in-editor sculpt/paint brushes** — which is the "fix mistakes / build harbors by hand in the editor" requirement, solved without custom tooling.
 - Source data: our GEBCO crop is 2880×2880 but we currently sample it at 513² — 5×+ coastline fidelity is already in the data. Convert `region_height.bin` → EXR/RAW for the Terrain3D importer; bake the saturating height curve into the import.
 - Low migration risk: gameplay only needs "in `land` group + collision"; buoyancy/ship code never touches terrain internals; landmask→water pipeline unchanged.
@@ -149,6 +168,10 @@ Full rationale in `DESIGN.md` ("Ship customization" + "Naval combat"). The commi
 - **Shot types** map to existing stats: round → durability, chain → sail health, grape → crew. **Morale breaks end fights** (strike colors → plunder / press crew / capture; prizes seed the fleet). **Boarding is resolved** in choice rounds (event-UI style), never a melee minigame.
 
 Build order (each step playable): 🔴 pirate + round shot + surrender/flee AI → 🟡 shot types + sail damage → 🟡 boarding resolver + capture → 🔴 encounter variety (navy patrols, escorts, fleet fights). Prereq: shipyard UI (buy cannons) — a natural extension of the market screen.
+
+**Progress:** step-0 pirate exists (spawns west of the player spawn, anchored → raises sails → chases; real collision body with buoyancy). **The input-provider refactor is DONE:** ShipController now drives from command channels (`turn_input` + sail targets) with `is_player` gating input/camera/docking/observe, and carries its own `ship_state` (player's = GameState.ship, injected by world.gd). `NPCShip extends ShipController` — the pirate sails the SAME wind physics (spool-up, pace, steerageway); upwind escapes are real. PortArea/DiscoveryArea guard on `is_player` so NPC hulls can't dock or claim discoveries. HUD has a color-coded hull bar.
+**CANNONS ARE IN:** `CannonDef` (equipment .tres — `data/items/culverin.tres`; ships carry `cannon_id` + `cannon_count` on ShipState, default 4 culverins until the shipyard exists). `Broadside` component on every armed hull (port/starboard batteries, independent 6s reloads, 55° arcs, volley = one ball per gun with hull spread + scatter); `CannonBall` physical projectiles (dodgeable, gentle drop, hit ships or land). Player fires with **Q (port) / R (starboard)** — aiming is maneuvering. Pirate fires any arc you drift into. Damage → `receive_hit` → hull bar moves; NPCs sink for real (slip under + 150g/25 battle-fame salvage payout); player is spared at 1 hull (death design still open). HUD shows per-side reload state + hit toasts. Signals: `broadside_fired`, `ship_hit`, `ship_sunk`.
+Next in §5: enemy morale → strike colors → plunder/capture choice (replaces sink-as-default), shot types (chain → sail_health, grape → crew), then the shipyard to buy better guns.
 
 ---
 

@@ -75,6 +75,8 @@ func _ready() -> void:
 
 func interact() -> String:
 	EventBus.city_building_interacted.emit(_city_id(), building_type)
+	if Facilities.has_facility(StringName(building_type)):
+		return ""  # a Facility UI opens via the signal; suppress the toast
 	return "%s — not yet open" % (sign_text if sign_text != "" else building_type.capitalize())
 
 func _city_id() -> StringName:

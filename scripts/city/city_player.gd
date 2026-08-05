@@ -133,20 +133,19 @@ func _exit_tree() -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 func _try_interact() -> void:
-	var best: CityBuilding = null
+	# Buildings and NPCs share the same contract: door_position + interact().
+	var best: Node = null
 	var best_d := INTERACT_RANGE
-	for b in get_tree().get_nodes_in_group("city_building"):
-		var building := b as CityBuilding
-		if building == null:
-			continue
-		var d := global_position.distance_to(building.door_position)
-		if d < best_d:
-			best_d = d
-			best = building
+	for group in ["city_building", "npc"]:
+		for node in get_tree().get_nodes_in_group(group):
+			var d: float = global_position.distance_to(node.door_position)
+			if d < best_d:
+				best_d = d
+				best = node
 	if best:
-		var msg := best.interact()
+		var msg: String = best.interact()
 		var city := _find_city()
-		if city:
+		if city and msg != "":
 			city.show_toast(msg)
 
 func _find_city() -> CityScene:

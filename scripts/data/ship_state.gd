@@ -9,6 +9,13 @@ var crew: int = 10
 var supplies := {&"water": 50, &"food": 50}  # consumed per day at sea (later system)
 var morale: float = 1.0                      # 0..1, affects speed & events
 var cargo: CargoHold = CargoHold.new()
+# Armament: which CannonDef (data/items/) and how many, split across both
+# broadsides. The shipyard will buy/sell these; every hull starts modest.
+var cannon_id: StringName = &"culverin"
+var cannon_count: int = 4
+
+func cannons_per_side() -> int:
+	return maxi(cannon_count / 2, 1) if cannon_count > 0 else 0
 
 static func new_from_def(p_def: ShipDef) -> ShipState:
 	var s := ShipState.new()
@@ -51,6 +58,8 @@ func to_dict() -> Dictionary:
 		"supplies": {"water": supplies[&"water"], "food": supplies[&"food"]},
 		"morale": morale,
 		"cargo": cargo.to_dict(),
+		"cannon_id": String(cannon_id),
+		"cannon_count": cannon_count,
 	}
 
 static func from_dict_static(d: Dictionary) -> ShipState:
@@ -65,4 +74,6 @@ static func from_dict_static(d: Dictionary) -> ShipState:
 	s.supplies = {&"water": int(sup.get("water", 50)), &"food": int(sup.get("food", 50))}
 	s.morale = float(d.get("morale", 1.0))
 	s.cargo = CargoHold.from_dict_static(d.get("cargo", {}))
+	s.cannon_id = StringName(d.get("cannon_id", "culverin"))
+	s.cannon_count = int(d.get("cannon_count", 4))
 	return s

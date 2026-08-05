@@ -13,4 +13,7 @@ extends Resource
 @export var fame_reward: int = 50
 @export var gold_reward: int = 0
 @export var unlock_flag: StringName = &""   # optional world effect, e.g. unlocks a route/good
+## Hidden discoveries don't appear in the journal until found — the hook for
+## quest-gated and mythic content (revealed by rumors/quests leading you there).
+@export var hidden := false
 @export_multiline var lore: String          # shown in encyclopedia on discovery
